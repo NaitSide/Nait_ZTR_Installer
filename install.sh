@@ -54,7 +54,7 @@ Nait ZTR Installer v${NAIT_ZTR_INSTALLER_VERSION} (MVP)
 
 1) Развернуть self-hosted ZeroTier Controller + ZTNCUI (веб-интерфейс)
 2) Установить клиент ZeroTier
-3) Мастер создания к сети ZeroTier (CLI)
+3) Мастер создания сети ZeroTier (CLI)
 4) Подключить узел к сети ZeroTier (CLI)
 5) Одобрить узел в сети ZeroTier (CLI)
 6) Установить ZTNCUI
