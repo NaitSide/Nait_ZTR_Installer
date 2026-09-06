@@ -5,7 +5,7 @@ controller_api_available() {
 
   token="$(get_zt_token_quiet)"
   [[ -n "${token}" ]] || return 1
-  curl -fsS --max-time 3 -H "X-ZT1-Auth: ${token}" "${ZT_LOCAL_API}/status" >/dev/null
+  curl -fsS --max-time 3 -H "X-ZT1-Auth: ${token}" "${ZT_LOCAL_API}/status" >/dev/null 2>&1
 }
 
 wait_for_controller_api() {
