@@ -1,0 +1,21 @@
+.env
+*.env
+*.log
+data/
+*.bak
+.DS_Store
+.vscode/
+.idea/
+
+# Local archive from the private prototype. These files are intentionally not
+# included in the first public version of the installer.
+/config/ztnet.docker-compose.example.yml
+/config/ztr.env.example
+/docs/
+/lib/approve.sh
+/lib/client.sh
+/lib/core.sh
+/lib/firewall.sh
+/lib/zerotier-edge.sh
+/lib/ztnet.sh
+/cleanup_legacy_files.bat
