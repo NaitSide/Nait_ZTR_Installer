@@ -31,15 +31,46 @@ authorize_node_interactive() {
   local network_id
   local node_id
   local ip
+  local candidate
+  local -a network_ids=()
 
-  network_id="$(prompt_with_default "Network ID" "")"
-  node_id="$(prompt_with_default "Node ID" "")"
+  preflight_common
+  require_controller_host
+
+  mapfile -t network_ids < <(list_controller_network_ids)
+
+  case "${#network_ids[@]}" in
+    0)
+      die "На этом Controller пока нет сетей. Сначала создайте сеть через пункт 3."
+      ;;
+    1)
+      network_id="${network_ids[0]}"
+      printf '\nNetwork ID: %s\n' "${network_id}"
+      ;;
+    *)
+      printf '\nНа этом Controller найдено несколько сетей:\n'
+      printf -- '- %s\n' "${network_ids[@]}"
+
+      while true; do
+        network_id="$(prompt_with_default "Network ID" "")"
+        for candidate in "${network_ids[@]}"; do
+          if [[ "${network_id,,}" == "${candidate,,}" ]]; then
+            network_id="${candidate}"
+            break 2
+          fi
+        done
+        log_warn "Укажите Network ID из списка выше."
+      done
+      ;;
+  esac
+
+  node_id="$(prompt_with_default "Node ID узла, который хотите одобрить" "")"
   ip="$(prompt_with_default "Ручной IPv4-адрес (необязательно)" "")"
 
   if [[ -n "${ip}" ]]; then
-    authorize_node --network-id "${network_id}" --node-id "${node_id}" --ip "${ip}"
+    authorize_node_prechecked "${network_id}" "${node_id}" "${ip}"
   else
-    authorize_node --network-id "${network_id}" --node-id "${node_id}"
+    authorize_node_prechecked "${network_id}" "${node_id}" ""
   fi
 }
 
@@ -52,6 +83,14 @@ authorize_node() {
 
   preflight_common
   require_controller_host
+  authorize_node_prechecked "${network_id}" "${node_id}" "${ip}"
+}
+
+authorize_node_prechecked() {
+  local network_id="${1:?network id обязателен}"
+  local node_id="${2:?node id обязателен}"
+  local ip="${3:-}"
+
   [[ "${network_id}" =~ ^[0-9a-fA-F]{16}$ ]] || die "Network ID должен состоять из 16 шестнадцатеричных символов."
   [[ "${node_id}" =~ ^[0-9a-fA-F]{10}$ ]] || die "Node ID должен состоять из 10 шестнадцатеричных символов."
   [[ -z "${ip}" ]] || validate_ipv4 "${ip}" || die "Некорректный IPv4-адрес: ${ip}"

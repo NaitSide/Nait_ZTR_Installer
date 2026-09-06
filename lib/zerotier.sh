@@ -140,6 +140,18 @@ zt_api_post() {
     "${ZT_LOCAL_API}${path}"
 }
 
+list_controller_network_ids() {
+  zt_api_get "/controller/network" | jq -r '
+    if type == "array" then
+      .[] | if type == "string" then . else (.nwid // .id // empty) end
+    elif type == "object" then
+      keys[]
+    else
+      empty
+    end
+  '
+}
+
 zt_join_network() {
   local network_id="${1:?network id обязателен}"
   local response

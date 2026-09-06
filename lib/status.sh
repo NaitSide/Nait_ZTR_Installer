@@ -163,24 +163,10 @@ status_print_processed_ztr_block() {
 }
 
 status_print_ztncui_block() {
-  local ztr_role="${1:-неизвестно}"
   local service_state=""
   local version=""
 
-  if [[ "${ztr_role}" == "ZeroTier node" ]]; then
-    return 1
-  fi
-
-  if [[ "${ztr_role}" == "неизвестно" ]] \
-    && [[ ! -f "/etc/systemd/system/${NAIT_ZTNCUI_SERVICE}" ]] \
-    && [[ ! -f "/lib/systemd/system/${NAIT_ZTNCUI_SERVICE}" ]] \
-    && [[ ! -f "/usr/lib/systemd/system/${NAIT_ZTNCUI_SERVICE}" ]]; then
-    return 1
-  fi
-
   echo "ZTNCUI:"
-  echo "- Systemd service: ${NAIT_ZTNCUI_SERVICE}"
-  echo "- Web UI: http://127.0.0.1:3000"
 
   if [[ ! -f "/etc/systemd/system/${NAIT_ZTNCUI_SERVICE}" ]] \
     && [[ ! -f "/lib/systemd/system/${NAIT_ZTNCUI_SERVICE}" ]] \
@@ -193,6 +179,11 @@ status_print_ztncui_block() {
   version="$(get_installed_ztncui_version 2>/dev/null || true)"
   echo "- Статус: ${service_state:-неизвестно}"
   echo "- Версия: ${version:-не удалось определить}"
+  if [[ "${service_state}" == "active" ]]; then
+    echo "- Веб-интерфейс доступен: http://127.0.0.1:3000 (после прокидывания SSH-туннеля)"
+  else
+    echo "- Веб-интерфейс недоступен: сервис не запущен"
+  fi
 }
 
 status_print_ufw_block() {
@@ -264,9 +255,8 @@ show_status() {
 
   status_print_processed_ztr_block "${networks_output}"
   echo
-  if status_print_ztncui_block "${inferred_role}"; then
-    echo
-  fi
+  status_print_ztncui_block
+  echo
   status_print_ufw_block
   echo
 
