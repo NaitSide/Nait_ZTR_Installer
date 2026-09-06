@@ -8,11 +8,27 @@ controller_api_available() {
   curl -fsS --max-time 3 -H "X-ZT1-Auth: ${token}" "${ZT_LOCAL_API}/status" >/dev/null
 }
 
+wait_for_controller_api() {
+  local attempt
+
+  for attempt in {1..20}; do
+    if controller_api_available; then
+      [[ "${attempt}" -eq 1 ]] || printf '\n'
+      return 0
+    fi
+    printf '.'
+    sleep 1
+  done
+
+  printf '\n'
+  return 1
+}
+
 enable_local_controller() {
   id zerotier-one >/dev/null 2>&1 || die "Системный пользователь zerotier-one не найден."
   run_sudo install -d -o zerotier-one -g zerotier-one -m 0700 /var/lib/zerotier-one/controller.d
   run_sudo systemctl restart zerotier-one
-  controller_api_available || die "Локальный API ZeroTier недоступен на ${ZT_LOCAL_API}."
+  wait_for_controller_api || die "Локальный API ZeroTier недоступен на ${ZT_LOCAL_API}."
 }
 
 require_controller_host() {
