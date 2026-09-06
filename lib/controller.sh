@@ -8,6 +8,19 @@ controller_api_available() {
   curl -fsS --max-time 3 -H "X-ZT1-Auth: ${token}" "${ZT_LOCAL_API}/status" >/dev/null 2>&1
 }
 
+is_controller_host() {
+  local network_ids=""
+
+  if run_sudo_quiet test -f "${NAIT_ZTR_CONTROLLER_MARKER}"; then
+    return 0
+  fi
+
+  is_zerotier_installed || return 1
+  controller_api_available || return 1
+  network_ids="$(list_controller_network_ids 2>/dev/null || true)"
+  [[ -n "${network_ids}" ]]
+}
+
 wait_for_controller_api() {
   local attempt
 
@@ -29,11 +42,12 @@ enable_local_controller() {
   run_sudo install -d -o zerotier-one -g zerotier-one -m 0700 /var/lib/zerotier-one/controller.d
   run_sudo systemctl restart zerotier-one
   wait_for_controller_api || die "Локальный API ZeroTier недоступен на ${ZT_LOCAL_API}."
+  ensure_dir "${NAIT_ZTR_CONFIG_DIR}" "0750"
+  run_sudo install -m 0640 /dev/null "${NAIT_ZTR_CONTROLLER_MARKER}"
 }
 
 require_controller_host() {
-  is_zerotier_installed || die "[ОШИБКА] На этом хосте не установлен ZeroTier Controller."
-  run_sudo_quiet test -d /var/lib/zerotier-one/controller.d \
+  is_controller_host \
     || die "[ОШИБКА] На этом хосте не установлен ZeroTier Controller. Сначала выберите пункт 1."
   controller_api_available \
     || die "[ОШИБКА] Локальный API ZeroTier Controller недоступен на ${ZT_LOCAL_API}."

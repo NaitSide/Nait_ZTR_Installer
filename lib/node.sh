@@ -24,7 +24,7 @@ join_network_interactive() {
   is_zerotier_installed || die "ZeroTier не установлен. Сначала выберите пункт 2."
   ensure_zerotier_service
 
-  if run_sudo_quiet test -d /var/lib/zerotier-one/controller.d; then
+  if is_controller_host; then
     log_error "Это хост с ZeroTier Controller."
     cat <<EOF
 

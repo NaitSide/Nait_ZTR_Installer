@@ -27,7 +27,7 @@ status_infer_ztr_role() {
   local networks_output="${1:-}"
   local core_ip="${NAIT_ZTR_CORE_IP:-${NAIT_ZTR_DEFAULT_CORE_IP}}"
 
-  if run_sudo_quiet test -d /var/lib/zerotier-one/controller.d; then
+  if is_controller_host; then
     echo "ZeroTier Controller"
     return 0
   fi

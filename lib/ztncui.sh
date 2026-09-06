@@ -36,8 +36,8 @@ require_local_controller_for_ztncui() {
 
   is_zerotier_installed \
     || die "ZTNCUI устанавливается только на ZeroTier Controller с уже установленным ZeroTier One."
-  run_sudo_quiet test -d /var/lib/zerotier-one/controller.d \
-    || die "Локальный ZeroTier Controller не найден: отсутствует /var/lib/zerotier-one/controller.d."
+  is_controller_host \
+    || die "Локальный ZeroTier Controller не найден. Сначала выберите пункт 1."
   run_sudo_quiet test -r /var/lib/zerotier-one/authtoken.secret \
     || die "Не удалось прочитать token локального ZeroTier controller."
   controller_token="$(run_sudo_quiet cat /var/lib/zerotier-one/authtoken.secret)"
@@ -173,7 +173,6 @@ install_ztncui() {
 - Версия: ${version} (проверенная этим установщиком)
 - Источник: официальный DEB-пакет Key Networks или local offline package
 - Systemd service: ${NAIT_ZTNCUI_SERVICE}
-- ZeroTier controller: существующий ${ZT_LOCAL_API}
 - Web UI: http://127.0.0.1:3000
 - Внешние порты ZTNCUI: не открываются
 - Docker и PostgreSQL: не требуются
