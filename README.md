@@ -1,14 +1,29 @@
 # Nait ZTR Installer
 
+## Установка
+
+```bash
+cd ~ && curl -L \
+-o nait-ztr-installer.tar.gz \
+https://api.github.com/repos/NaitSide/Nait_ZTR_Installer/tarball/main \
+&& rm -rf Nait_ZTR_Installer \
+&& mkdir Nait_ZTR_Installer \
+&& tar -xzf nait-ztr-installer.tar.gz -C Nait_ZTR_Installer --strip-components=1 \
+&& cd Nait_ZTR_Installer \
+&& chmod +x install.sh \
+&& ./install.sh
+```
+
+
 ## Что такое ZeroTier?
 
-Это по сути самый дешманский свич TP-Link или D-Link - только виртуальный
-В обычный свич воткнули свои домашние железки с помощю пачкорда, задали ip и маску - готово, железки пингуются, видят дрг друга
+Это по сути самый дешманский свич TP-Link или D-Link - только виртуальный.
+В обычный свич воткнули свои домашние железки с помощю пачкорда, задали ip и маску - готово, железки пингуются, видят дрг друга.
 Когда нужно добавить vps сервера в одну локалку без танцев с бубном, тут поможет ZeroTier
 
 ## Nait ZTR Installer
 
-Nait ZTR Installer - это интерактивный инсталлер который поможет поднять сеть ZeroTier
+Nait ZTR Installer - это интерактивный инсталлер который поможет поднять сеть ZeroTier.
 
 ## Как это работает
 
@@ -48,17 +63,7 @@ Nait ZTR Installer - это интерактивный инсталлер кот
 
 
 
-## Установка
 
-```bash
-curl -fL https://github.com/NaitSide/Nait_ZTR_Installer/archive/refs/heads/main.tar.gz -o nait-ztr-installer.tar.gz
-tar -xzf nait-ztr-installer.tar.gz
-cd Nait_ZTR_Installer-main
-chmod +x install.sh
-./install.sh
-```
-
-Если на урезанном образе Ubuntu нет `curl`, установи его одной командой: `sudo apt-get install -y curl`.
 
 
 
