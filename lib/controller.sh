@@ -73,14 +73,24 @@ EOF
 
   if confirm "Установить ZTNCUI (веб-интерфейс)?" "Y"; then
     install_ztncui
-  fi
-
-  cat <<'EOF'
+    cat <<'EOF'
 
 Следующий шаг:
   Создайте сеть через ZTNCUI или пункт 3 этого меню.
 
 EOF
+  else
+    cat <<'EOF'
+
+ZeroTier Controller установлен.
+ZTNCUI: не установлен.
+
+Следующий шаг:
+  3) Создать сеть ZeroTier
+  6) Установить ZTNCUI
+
+EOF
+  fi
 }
 
 create_network_interactive() {

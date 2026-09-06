@@ -61,15 +61,20 @@ status_infer_ztr_role() {
 status_print_zerotier_block() {
   local node_id="${1:-}"
   local inferred_role="${2:-неизвестно}"
+  local id_label="Локальный NODE_ID"
   local service_state="недоступен"
   local service_substate=""
+
+  if [[ "${inferred_role}" == "ZeroTier Controller" ]]; then
+    id_label="Controller ID"
+  fi
 
   echo "ZeroTier:"
   if ! is_zerotier_installed; then
     echo "- Роль: ${inferred_role:-неизвестно}"
     echo "- Установлен: нет"
     echo "- Сервис: недоступен"
-    echo "- Локальный NODE_ID: не удалось определить"
+    echo "- ${id_label}: не удалось определить"
     return 0
   fi
 
@@ -84,20 +89,26 @@ status_print_zerotier_block() {
   echo "- Роль: ${inferred_role:-неизвестно}"
   echo "- Установлен: да"
   echo "- Сервис: ${service_state:-неизвестно}"
-  echo "- Локальный NODE_ID: ${node_id:-не удалось определить}"
+  echo "- ${id_label}: ${node_id:-не удалось определить}"
 }
 
 status_print_processed_ztr_block() {
   local networks_output="${1:-}"
+  local inferred_role="${2:-неизвестно}"
   local network_count
+  local missing_network_text="Сеть ZeroTier: не подключена"
+
+  if [[ "${inferred_role}" == "ZeroTier Controller" ]]; then
+    missing_network_text="Сеть ZeroTier: не создана"
+  fi
 
   if ! is_zerotier_installed; then
-    echo "Сеть ZTR: не найдена"
+    echo "${missing_network_text}"
     return 0
   fi
 
   if ! printf '%s\n' "${networks_output}" | awk '$1 == "200" && $2 == "listnetworks" && $3 ~ /^[0-9a-fA-F]{16}$/ {found=1} END {exit found ? 0 : 1}'; then
-    echo "Сеть ZTR: не найдена"
+    echo "${missing_network_text}"
     return 0
   fi
 
@@ -253,7 +264,7 @@ show_status() {
   status_print_zerotier_block "${node_id}" "${inferred_role}"
   echo
 
-  status_print_processed_ztr_block "${networks_output}"
+  status_print_processed_ztr_block "${networks_output}" "${inferred_role}"
   echo
   status_print_ztncui_block
   echo
