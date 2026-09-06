@@ -14,6 +14,9 @@ https://api.github.com/repos/NaitSide/Nait_ZTR_Installer/tarball/main \
 && ./install.sh
 ```
 
+> Сеть не создаётся автоматически. 
+> После установки создай сеть через пункт 3 в меню
+> или через вебморду ZTNCUI
 
 ## Что такое ZeroTier?
 
@@ -40,52 +43,21 @@ Nait ZTR Installer - это интерактивный инсталлер кот
 
 В инсталлере есть интерактивное меню авторизации клиентов в контроллере, если не хотите ставить ZTNCUI, но лучьше поставить, так проще понять что к чему
 
-## Что внутри
-
-Инсталлер self-hosted ZeroTier: Controller, подключение узлов и ZTNCUI (веб-интерфейс).
 
 
 ## Меню
 
-```text
-1) Развернуть self-hosted ZeroTier Controller + ZTNCUI (веб-интерфейс)
-2) Установить клиент ZeroTier
-3) Мастер создания сети ZeroTier (CLI)
-4) Подключить узел к сети ZeroTier (CLI)
-5) Одобрить узел в сети ZeroTier (CLI)
-6) Установить ZTNCUI
-7) Статус
-8) Выход
-```
+![Меню Nait ZTR Installer](img/Nait-ZTR-Installer-menu.png)
 
-
-> Controller не создаёт сеть автоматически. После установки создай сеть через пункт 3 меню или через ZTNCUI.
-
-
-
-
-
-
-
-`CLI` означает Command-Line Interface: действие выполняется в SSH-терминале, без веб-панели.
-
-Обычный сценарий: разверни Controller, создай сеть в ZTNCUI, установи ZeroTier на нужном сервере, подключи его по Network ID и одобри в веб-панели.
 
 ## Доступ к ZTNCUI
 
-прокинуть SSH тунель (Port Forwarding)
+Нужно прокинуть SSH тунель (Port Forwarding)
+Через Termius это делается так:
 
-```bash
-ssh -p <SSH_PORT> -L 3000:127.0.0.1:3000 <user>@<server>
-```
+![Настройка SSH Port Forwarding в Termius](img/SSH-port-forwarding.png)
 
-Я юзаю Termius
-
-Забей настройки как на скрине
-
-и в браузере открой 
-
-`http://127.0.0.1:3000`.
+и в браузере открой: `http://127.0.0.1:3000`
 
 Дефолтный логин и пароль: `admin` / `password`.
 
