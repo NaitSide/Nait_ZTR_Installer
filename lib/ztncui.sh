@@ -63,7 +63,6 @@ prepare_ztncui_package() {
   offline_package="${NAIT_ZTR_OFFLINE_DIR}/${filename}"
 
   if [[ -f "${offline_package}" ]]; then
-    log_info "Используется локальный offline package ZTNCUI: ${offline_package}"
     cp "${offline_package}" "${output_file}"
   else
     log_info "Загрузка официального DEB-пакета ZTNCUI ${version}."
@@ -189,6 +188,8 @@ EOF
   run_sudo apt-get install -y "${staged_package}"
   rm -f "${staged_package}"
 
+  log_info "↑ Предупреждение chown выше можно игнорировать."
+
   run_sudo_quiet test -d "${NAIT_ZTNCUI_DIR}" \
     || die "DEB-пакет не создал каталог ZTNCUI: ${NAIT_ZTNCUI_DIR}."
   id ztncui >/dev/null 2>&1 || die "DEB-пакет не создал системного пользователя ztncui."
@@ -199,15 +200,9 @@ EOF
 
   cat <<'EOF'
 
-ZTNCUI установлен и подключён к существующему ZeroTier Controller.
-
-SSH tunnel:
-  ssh -p <SSH_PORT> -L 3000:127.0.0.1:3000 <user>@<server>
-
-Браузер:
-  http://127.0.0.1:3000
-
-Первый вход: admin / password. Сразу смените пароль, создайте личную учётную запись
-и удалите стандартную admin. Port 3000 нельзя открывать напрямую в интернет.
+Веб-интерфейс ZTNCUI установлен и подключён к ZeroTier Controller.
+Прокинь SSH-туннель: (смотри README)
+Браузер: http://127.0.0.1:3000
+Первый вход: admin / password
 EOF
 }

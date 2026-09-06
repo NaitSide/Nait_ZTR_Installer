@@ -119,14 +119,12 @@ require_sudo() {
 
 run_sudo() {
   if [[ "${EUID}" -eq 0 ]]; then
-    printf '[INFO] Выполнение от root: %s\n' "$*" >&2
     write_log "INFO" "Выполнение от root: $*"
     "$@"
     return
   fi
 
   require_sudo
-  printf '[INFO] Выполнение через обычный sudo: %s\n' "$*" >&2
   write_log "INFO" "Выполнение через обычный sudo: $*"
   sudo "$@"
 }

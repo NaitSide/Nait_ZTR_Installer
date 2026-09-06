@@ -40,8 +40,6 @@ require_controller_host() {
 }
 
 install_controller_interactive() {
-  local ztncui_enabled="false"
-
   preflight_common
   install_zerotier
   ensure_zerotier_service
@@ -60,15 +58,10 @@ EOF
   enable_local_controller
 
   if confirm "Установить ZTNCUI (веб-интерфейс)?" "Y"; then
-    ztncui_enabled="true"
     install_ztncui
   fi
 
-  cat <<EOF
-
-ZeroTier Controller готов.
-- Локальный Node ID: $(get_zt_node_id_quiet)
-- ZTNCUI: $([[ "${ztncui_enabled}" == "true" ]] && echo "установлен" || echo "пропущен")
+  cat <<'EOF'
 
 Следующий шаг:
   Создайте сеть через ZTNCUI или пункт 3 этого меню.
