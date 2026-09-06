@@ -117,7 +117,52 @@ require_sudo() {
   command -v sudo >/dev/null 2>&1 || die "sudo обязателен."
 }
 
+require_apt_ready() {
+  local lock_file
+  local lock_pids
+  local lock_pid=""
+  local process_name=""
+
+  command -v fuser >/dev/null 2>&1 || return 0
+
+  for lock_file in \
+    /var/lib/dpkg/lock-frontend \
+    /var/lib/dpkg/lock \
+    /var/lib/apt/lists/lock \
+    /var/cache/apt/archives/lock; do
+    if [[ "${EUID}" -eq 0 ]]; then
+      lock_pids="$(fuser "${lock_file}" 2>/dev/null || true)"
+    else
+      require_sudo
+      lock_pids="$(sudo fuser "${lock_file}" 2>/dev/null || true)"
+    fi
+
+    if [[ -n "${lock_pids}" ]]; then
+      read -r lock_pid _ <<< "${lock_pids}"
+      break
+    fi
+  done
+
+  [[ -n "${lock_pid}" ]] || return 0
+
+  process_name="$(ps -p "${lock_pid}" -o comm= 2>/dev/null || true)"
+  process_name="${process_name//[[:space:]]/}"
+  process_name="${process_name:-неизвестный процесс}"
+
+  if [[ "${process_name}" == unattended-upgr* ]]; then
+    log_warn "Похоже, сервер только что развернули — Ubuntu устанавливает фоновые обновления."
+  else
+    log_warn "Менеджер пакетов Ubuntu сейчас занят другим процессом."
+  fi
+  log_warn "Процесс: ${process_name} (PID ${lock_pid})."
+  die "Подожди 2–5 минут и снова запусти этот пункт."
+}
+
 run_sudo() {
+  if [[ "${1:-}" == "apt-get" || "${1:-}" == "apt" ]]; then
+    require_apt_ready
+  fi
+
   if [[ "${EUID}" -eq 0 ]]; then
     write_log "INFO" "Выполнение от root: $*"
     "$@"

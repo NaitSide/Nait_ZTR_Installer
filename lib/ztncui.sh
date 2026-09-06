@@ -188,7 +188,7 @@ EOF
   run_sudo apt-get install -y "${staged_package}"
   rm -f "${staged_package}"
 
-  log_info "↑ Предупреждение chown выше можно игнорировать."
+  log_info "↑ Warning chown выше можно игнорировать."
 
   run_sudo_quiet test -d "${NAIT_ZTNCUI_DIR}" \
     || die "DEB-пакет не создал каталог ZTNCUI: ${NAIT_ZTNCUI_DIR}."
