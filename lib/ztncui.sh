@@ -149,6 +149,38 @@ get_installed_ztncui_version() {
   dpkg-query -W -f='${Version}\n' ztncui 2>/dev/null | sed 's/^[0-9]*://; s/-.*$//'
 }
 
+install_ztncui_package() {
+  local package="${1:?package обязателен}"
+  local install_log
+  local install_pid
+  local install_status
+
+  install_log="$(mktemp)"
+  printf '[INFO] Устанавливаю ZTNCUI и создаю TLS-сертификат'
+  DEBIAN_FRONTEND=noninteractive run_sudo apt-get install -y "${package}" \
+    >"${install_log}" 2>&1 &
+  install_pid=$!
+
+  while kill -0 "${install_pid}" 2>/dev/null; do
+    sleep 1
+    kill -0 "${install_pid}" 2>/dev/null && printf '.'
+  done
+
+  if wait "${install_pid}"; then
+    printf ' готово\n'
+    rm -f "${install_log}"
+    return 0
+  else
+    install_status=$?
+  fi
+
+  printf ' ошибка\n'
+  log_error "Не удалось установить ZTNCUI. Технические подробности:"
+  tail -n 60 "${install_log}" >&2 || true
+  rm -f "${install_log}"
+  return "${install_status}"
+}
+
 install_ztncui_interactive() {
   preflight_common
   install_ztncui
@@ -182,20 +214,26 @@ EOF
   confirm "Установить ZTNCUI по этому плану?" "N" || die "Установка ZTNCUI отменена."
 
   staged_package="$(mktemp --suffix=.deb)"
+  log_info "Подготавливаю пакет ZTNCUI ${version}."
   prepare_ztncui_package "${version}" "${staged_package}"
   chmod 0644 "${staged_package}"
-  run_sudo apt-get install -y "${staged_package}"
+  if ! install_ztncui_package "${staged_package}"; then
+    rm -f "${staged_package}"
+    die "Установка ZTNCUI завершилась с ошибкой."
+  fi
   rm -f "${staged_package}"
-
-  log_info "↑ Warning chown выше можно игнорировать."
 
   run_sudo_quiet test -d "${NAIT_ZTNCUI_DIR}" \
     || die "DEB-пакет не создал каталог ZTNCUI: ${NAIT_ZTNCUI_DIR}."
   id ztncui >/dev/null 2>&1 || die "DEB-пакет не создал системного пользователя ztncui."
+  log_info "Подключаю ZTNCUI к локальному Controller."
   write_ztncui_env
-  run_sudo systemctl enable --now "${NAIT_ZTNCUI_SERVICE}"
+  log_info "Запускаю веб-интерфейс ZTNCUI."
+  run_sudo_quiet systemctl enable --now "${NAIT_ZTNCUI_SERVICE}" >/dev/null \
+    || die "Не удалось запустить ZTNCUI."
   wait_for_ztncui_ready || die "ZTNCUI не запустился; ZeroTier One не изменялся."
   verify_ztncui_local_bind
+  log_info "ZTNCUI установлен и работает."
 
   cat <<'EOF'
 
