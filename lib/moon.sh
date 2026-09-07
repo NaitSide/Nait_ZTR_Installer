@@ -49,19 +49,20 @@ moon_export_dir() {
 }
 
 moon_list_ids() {
+  local output=""
+
   is_zerotier_installed || return 0
-  run_sudo_quiet zerotier-cli listmoons 2>/dev/null | awk '
-    {
-      for (i = 1; i <= NF; i++) {
-        value = tolower($i)
-        if (value ~ /^000000[0-9a-f]{10}$/) {
-          print substr(value, 7)
-        } else if (value ~ /^[0-9a-f]{10}$/) {
-          print value
-        }
-      }
-    }
-  ' | sort -u
+  output="$(run_sudo_quiet zerotier-cli -j listmoons 2>/dev/null || true)"
+
+  if jq -e . >/dev/null 2>&1 <<< "${output}"; then
+    jq -r '.[]? | .id // empty | ascii_downcase | sub("^000000"; "")' \
+      <<< "${output}" | sort -u
+    return 0
+  fi
+
+  # Совместимость со старыми версиями CLI, где listmoons возвращал строки 200.
+  sed -nE 's/^200 listmoons (000000)?([0-9a-fA-F]{10})([[:space:]].*)?$/\2/p' \
+    <<< "${output}" | tr '[:upper:]' '[:lower:]' | sort -u
 }
 
 moon_is_listed() {
@@ -180,19 +181,24 @@ controller_moon_endpoint() {
 show_existing_controller_moon() {
   local moon_id
   local endpoint
+  local public_filename
   local public_file
 
   moon_id="$(controller_moon_id)"
   endpoint="$(controller_moon_endpoint)"
   [[ -n "${moon_id}" ]] || die "Сохранённая конфигурация Moon повреждена: ${NAIT_ZTR_MOON_CONFIG_FILE}"
-  public_file="${NAIT_ZTR_MOON_CONFIG_DIR}/$(moon_public_filename "${moon_id}")"
+  public_filename="$(moon_public_filename "${moon_id}")"
+  public_file="$(moon_export_dir)/${public_filename}"
+  if [[ ! -f "${public_file}" ]]; then
+    public_file="${NAIT_ZTR_MOON_CONFIG_DIR}/${public_filename}"
+  fi
 
   cat <<EOF
 
 Резервная Moon уже создана.
 - Moon ID: ${moon_id}
 - Endpoint: ${endpoint:-не удалось определить}
-- Публичный файл: ${public_file}
+- Файл для клиентов: ${public_file}
 
 EOF
 }
