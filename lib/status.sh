@@ -270,6 +270,8 @@ show_status() {
   echo
   status_print_moon_block
   echo
+  print_root_connectivity_summary
+  echo
   status_print_ufw_block
   echo
 

@@ -50,7 +50,7 @@ moon_export_dir() {
 
 moon_list_ids() {
   is_zerotier_installed || return 0
-  run_sudo_quiet zerotier-cli listmoons 2>/dev/null | jq -r '
+  run_sudo_quiet zerotier-cli -j listmoons 2>/dev/null | jq -r '
     .[]?.id // empty
     | ascii_downcase
     | if test("^000000[0-9a-f]{10}$") then .[6:] else . end
@@ -74,6 +74,68 @@ wait_for_moon() {
   done
 
   return 1
+}
+
+zt_root_peer_rows() {
+  is_zerotier_installed || return 0
+  run_sudo_quiet zerotier-cli -j listpeers 2>/dev/null | jq -r '
+    .[]?
+    | (.role // "" | ascii_upcase) as $role
+    | select($role == "MOON" or $role == "PLANET")
+    | [
+        $role,
+        ((.address // .id // "неизвестно") | tostring | ascii_downcase),
+        (.paths[0].address // .path // "")
+      ]
+    | @tsv
+  '
+}
+
+print_root_connectivity_summary() {
+  local configured_moons=""
+  local root_rows=""
+  local role=""
+  local peer_id=""
+  local path=""
+  local moon_count=0
+  local planet_count=0
+
+  echo "Связь с Root-серверами:"
+  if ! is_zerotier_installed; then
+    echo "- ZeroTier не установлен"
+    return 0
+  fi
+
+  configured_moons="$(moon_list_ids || true)"
+  root_rows="$(zt_root_peer_rows || true)"
+
+  while IFS=$'\t' read -r role peer_id path; do
+    [[ -n "${role}" ]] || continue
+    case "${role}" in
+      MOON)
+        moon_count=$((moon_count + 1))
+        ;;
+      PLANET)
+        planet_count=$((planet_count + 1))
+        ;;
+    esac
+  done <<< "${root_rows}"
+
+  if [[ -z "${configured_moons}" ]]; then
+    echo "- Резервная Moon: не настроена"
+  elif [[ "${moon_count}" -gt 0 ]]; then
+    echo "- Резервная Moon: доступна (${moon_count} активн. root-пир.)"
+  else
+    echo "- Резервная Moon: настроена, активная связь пока не обнаружена"
+  fi
+
+  if [[ "${planet_count}" -gt 0 ]]; then
+    echo "- Официальная Planet: доступна (${planet_count} активн. root-пир.)"
+  else
+    echo "- Официальная Planet: активные root-пиры сейчас не обнаружены"
+  fi
+
+  echo "- Moon помогает найти Controller; трафик между узлами после подключения идёт напрямую."
 }
 
 controller_moon_id() {
@@ -237,10 +299,12 @@ connect_moon_by_id_interactive() {
   run_sudo zerotier-cli orbit "${moon_id}" "${moon_id}"
   run_sudo systemctl restart zerotier-one
   if wait_for_moon "${moon_id}"; then
-    log_info "Резервная Moon ${moon_id} подключена."
+    log_info "Резервная Moon ${moon_id} добавлена в конфигурацию клиента."
   else
-    log_warn "Moon добавлена, но пока недоступна. Проверьте её публичный адрес и ${NAIT_ZTR_MOON_PORT}/udp."
+    log_warn "Команда принята, но Moon пока не появилась в конфигурации клиента. Проверьте её публичный адрес и ${NAIT_ZTR_MOON_PORT}/udp."
   fi
+
+  print_root_connectivity_summary
 }
 
 connect_moon_by_file_interactive() {
@@ -264,10 +328,12 @@ connect_moon_by_file_interactive() {
   run_sudo systemctl restart zerotier-one
 
   if wait_for_moon "${moon_id}"; then
-    log_info "Резервная Moon ${moon_id} подключена из файла."
+    log_info "Файл Moon добавлен в конфигурацию клиента."
   else
-    log_warn "Файл Moon установлен, но Root пока недоступен. Проверьте endpoint и ${NAIT_ZTR_MOON_PORT}/udp."
+    log_warn "Файл Moon установлен, но пока не появился в конфигурации клиента. Проверьте endpoint и ${NAIT_ZTR_MOON_PORT}/udp."
   fi
+
+  print_root_connectivity_summary
 }
 
 connect_moon_interactive() {
@@ -296,8 +362,10 @@ configure_moon_interactive() {
   ensure_zerotier_service
 
   if is_controller_host; then
+    log_info "Режим Controller: создание резервной Moon."
     create_controller_moon_interactive
   else
+    log_info "Режим клиента: подключение резервной Moon."
     connect_moon_interactive
   fi
 }

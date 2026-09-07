@@ -62,7 +62,7 @@ Nait ZTR Installer v${NAIT_ZTR_INSTALLER_VERSION} (MVP)
 4) Подключить узел к сети ZeroTier (CLI)
 5) Одобрить узел в сети ZeroTier (CLI)
 6) Установить ZTNCUI
-7) Настроить резервную Moon
+7) Резервная Moon: создать на Controller / подключить на клиенте
 8) Статус
 9) Выход
 

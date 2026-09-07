@@ -57,6 +57,9 @@ EOF
 
 EOF
 
+  print_root_connectivity_summary
+  echo
+
   if zt_network_has_assigned_ip "${network_id}"; then
     log_info "Узел подключён к сети ${network_id}; IP назначен."
     return 0
