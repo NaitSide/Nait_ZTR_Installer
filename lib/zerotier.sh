@@ -89,9 +89,9 @@ install_zerotier() {
 
 ensure_zerotier_service() {
   log_info "Включение и запуск zerotier-one."
-  run_sudo_quiet systemctl enable zerotier-one >/dev/null \
+  run_sudo_quiet systemctl enable zerotier-one >/dev/null 2>&1 \
     || die "Не удалось включить автозапуск zerotier-one."
-  run_sudo_quiet systemctl start zerotier-one >/dev/null \
+  run_sudo_quiet systemctl start zerotier-one >/dev/null 2>&1 \
     || die "Не удалось запустить zerotier-one."
 
   local attempt

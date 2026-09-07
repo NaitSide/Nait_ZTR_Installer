@@ -229,7 +229,7 @@ EOF
   log_info "Подключаю ZTNCUI к локальному Controller."
   write_ztncui_env
   log_info "Запускаю веб-интерфейс ZTNCUI."
-  run_sudo_quiet systemctl enable --now "${NAIT_ZTNCUI_SERVICE}" >/dev/null \
+  run_sudo_quiet systemctl enable --now "${NAIT_ZTNCUI_SERVICE}" >/dev/null 2>&1 \
     || die "Не удалось запустить ZTNCUI."
   wait_for_ztncui_ready || die "ZTNCUI не запустился; ZeroTier One не изменялся."
   verify_ztncui_local_bind
