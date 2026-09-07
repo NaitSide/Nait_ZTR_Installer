@@ -45,7 +45,7 @@ moon_public_filename() {
 }
 
 moon_export_dir() {
-  printf '%s/Nait_ZTR_Moon\n' "${HOME:-/root}"
+  printf '%s\n' "${REPO_ROOT}"
 }
 
 moon_list_ids() {
@@ -73,13 +73,35 @@ wait_for_moon() {
   local moon_id="${1:?moon id обязателен}"
   local attempt
 
+  printf '[INFO] Проверяю подключение Moon'
   for attempt in {1..15}; do
     if moon_is_listed "${moon_id}"; then
+      printf ' готово\n'
       return 0
     fi
     sleep 1
+    printf '.'
   done
 
+  printf '\n'
+  return 1
+}
+
+wait_for_zerotier_ready() {
+  local attempt
+
+  printf '[INFO] Завершаю настройку Moon'
+  for attempt in {1..15}; do
+    if run_sudo_quiet systemctl is-active --quiet zerotier-one \
+      && [[ -n "$(get_zt_node_id_quiet 2>/dev/null || true)" ]]; then
+      printf ' готово\n'
+      return 0
+    fi
+    sleep 1
+    printf '.'
+  done
+
+  printf '\n'
   return 1
 }
 
@@ -182,7 +204,8 @@ open_moon_ufw_port_if_needed() {
   ufw_status="$(run_sudo_quiet ufw status 2>/dev/null | awk -F': ' '/^Status:/ {print $2; exit}' || true)"
   [[ "${ufw_status}" == "active" ]] || return 0
 
-  run_sudo ufw allow "${NAIT_ZTR_MOON_PORT}/udp" comment 'ZeroTier Moon'
+  run_sudo_quiet ufw allow "${NAIT_ZTR_MOON_PORT}/udp" comment 'ZeroTier Moon' >/dev/null
+  log_info "UFW: открыт ${NAIT_ZTR_MOON_PORT}/udp для ZeroTier Moon."
 }
 
 create_controller_moon_interactive() {
@@ -268,9 +291,10 @@ EOF
   open_moon_ufw_port_if_needed
   run_sudo systemctl restart zerotier-one
 
-  if ! wait_for_moon "${moon_id}"; then
-    log_warn "Moon создана, но пока не появилась в списке ZeroTier. Проверьте ${NAIT_ZTR_MOONS_DIR}/${public_filename}."
-  fi
+  run_sudo_quiet test -f "${NAIT_ZTR_MOONS_DIR}/${public_filename}" \
+    || die "Файл Moon не найден после установки: ${NAIT_ZTR_MOONS_DIR}/${public_filename}"
+  wait_for_zerotier_ready \
+    || die "Сервис ZeroTier не запустился после настройки Moon."
 
   rm -rf -- "${temp_dir}"
   trap - EXIT
