@@ -50,10 +50,17 @@ moon_export_dir() {
 
 moon_list_ids() {
   is_zerotier_installed || return 0
-  run_sudo_quiet zerotier-cli -j listmoons 2>/dev/null | jq -r '
-    .[]?.id // empty
-    | ascii_downcase
-    | if test("^000000[0-9a-f]{10}$") then .[6:] else . end
+  run_sudo_quiet zerotier-cli listmoons 2>/dev/null | awk '
+    {
+      for (i = 1; i <= NF; i++) {
+        value = tolower($i)
+        if (value ~ /^000000[0-9a-f]{10}$/) {
+          print substr(value, 7)
+        } else if (value ~ /^[0-9a-f]{10}$/) {
+          print value
+        }
+      }
+    }
   ' | sort -u
 }
 
@@ -121,7 +128,9 @@ print_root_connectivity_summary() {
     esac
   done <<< "${root_rows}"
 
-  if [[ -z "${configured_moons}" ]]; then
+  if run_sudo_quiet test -f "${NAIT_ZTR_MOON_CONFIG_FILE}"; then
+    echo "- Резервная Moon: размещена на этом Controller"
+  elif [[ -z "${configured_moons}" ]]; then
     echo "- Резервная Moon: не настроена"
   elif [[ "${moon_count}" -gt 0 ]]; then
     echo "- Резервная Moon: доступна (${moon_count} активн. root-пир.)"
@@ -312,6 +321,15 @@ connect_moon_by_file_interactive() {
   local filename=""
   local moon_id=""
 
+  cat <<EOF
+
+Загрузите файл Moon через SFTP в домашнюю папку обычного пользователя.
+Пример: /home/<username>/000000<moon-id>.moon
+
+Укажите полный путь к загруженному файлу ниже.
+Инсталлер сам скопирует его в системную папку ZeroTier и перезапустит сервис.
+
+EOF
   moon_file="$(prompt_with_default "Путь к файлу .moon" "")"
   [[ -f "${moon_file}" ]] || die "Файл не найден: ${moon_file}"
   filename="$(basename "${moon_file}")"
@@ -398,6 +416,10 @@ status_print_moon_block() {
 
   echo "- Статус: подключена"
   while IFS= read -r moon_id; do
-    [[ -n "${moon_id}" ]] && echo "- Moon ID: ${moon_id}"
+    [[ -n "${moon_id}" ]] || continue
+    echo "- Moon ID: ${moon_id}"
+    if run_sudo_quiet test -f "${NAIT_ZTR_MOONS_DIR}/$(moon_public_filename "${moon_id}")"; then
+      echo "- Файл Moon: ${NAIT_ZTR_MOONS_DIR}/$(moon_public_filename "${moon_id}")"
+    fi
   done <<< "${moon_ids}"
 }

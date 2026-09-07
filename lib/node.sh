@@ -19,6 +19,7 @@ EOF
 
 join_network_interactive() {
   local network_id
+  local node_id
 
   preflight_common
   is_zerotier_installed || die "ZeroTier не установлен. Сначала выберите пункт 2."
@@ -35,6 +36,8 @@ EOF
     return 0
   fi
 
+  node_id="$(get_zt_node_id_quiet)"
+  printf '\nNode ID текущего узла: %s\n' "${node_id}"
   network_id="$(prompt_with_default "Network ID" "")"
   while [[ ! "${network_id}" =~ ^[0-9a-fA-F]{16}$ ]]; do
     log_warn "Network ID должен состоять из 16 шестнадцатеричных символов."
@@ -47,7 +50,7 @@ EOF
 
 Запрос на вступление в сеть отправлен.
 - Network ID: ${network_id}
-- Node ID текущего узла: $(get_zt_node_id_quiet)
+- Node ID текущего узла: ${node_id}
 
 Для private-сети одобрите этот узел:
 - в ZTNCUI на Controller; или
