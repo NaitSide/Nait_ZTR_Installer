@@ -14,6 +14,8 @@ source "${REPO_ROOT}/lib/zerotier.sh"
 source "${REPO_ROOT}/lib/ztncui.sh"
 # shellcheck source=lib/controller.sh
 source "${REPO_ROOT}/lib/controller.sh"
+# shellcheck source=lib/moon.sh
+source "${REPO_ROOT}/lib/moon.sh"
 # shellcheck source=lib/node.sh
 source "${REPO_ROOT}/lib/node.sh"
 # shellcheck source=lib/authorize.sh
@@ -33,6 +35,7 @@ Nait_ZTR_Installer
   ./install.sh join-network
   ./install.sh authorize-node --network-id <NETWORK_ID> --node-id <NODE_ID> [--ip <IP>]
   ./install.sh ztncui-install
+  ./install.sh moon
   ./install.sh status
   ./install.sh help
 
@@ -42,6 +45,7 @@ Nait_ZTR_Installer
   create-network   Создать сеть через локальный Controller.
   join-network     Подключить текущий узел к сети по Network ID.
   authorize-node   Одобрить узел на локальном Controller.
+  moon             Создать Moon на Controller или подключить её на узле.
 EOF
 }
 
@@ -58,8 +62,9 @@ Nait ZTR Installer v${NAIT_ZTR_INSTALLER_VERSION} (MVP)
 4) Подключить узел к сети ZeroTier (CLI)
 5) Одобрить узел в сети ZeroTier (CLI)
 6) Установить ZTNCUI
-7) Статус
-8) Выход
+7) Настроить резервную Moon
+8) Статус
+9) Выход
 
 EOF
 }
@@ -67,7 +72,7 @@ EOF
 interactive_menu() {
   while true; do
     show_menu
-    choice="$(read_user_input "Выберите пункт [1-8]: ")"
+    choice="$(read_user_input "Выберите пункт [1-9]: ")"
     case "${choice}" in
       1) install_controller_interactive ;;
       2) install_client_interactive ;;
@@ -75,8 +80,9 @@ interactive_menu() {
       4) join_network_interactive ;;
       5) authorize_node_interactive ;;
       6) install_ztncui_interactive ;;
-      7) show_status ;;
-      8) log_info "Выход."; return 0 ;;
+      7) configure_moon_interactive ;;
+      8) show_status ;;
+      9) log_info "Выход."; return 0 ;;
       *) log_warn "Неизвестный пункт меню: ${choice}" ;;
     esac
   done
@@ -129,6 +135,11 @@ dispatch() {
       shift
       [[ "$#" -eq 0 ]] || die "Команда ztncui-install не принимает аргументы."
       install_ztncui_interactive
+      ;;
+    moon)
+      shift
+      [[ "$#" -eq 0 ]] || die "Команда moon не принимает аргументы."
+      configure_moon_interactive
       ;;
     status)
       shift

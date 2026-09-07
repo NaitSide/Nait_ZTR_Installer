@@ -268,6 +268,8 @@ show_status() {
   echo
   status_print_ztncui_block
   echo
+  status_print_moon_block
+  echo
   status_print_ufw_block
   echo
 
