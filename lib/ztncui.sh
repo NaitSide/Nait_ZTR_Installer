@@ -178,7 +178,9 @@ RUN dpkg-deb -x /tmp/ztncui.deb / \
     && useradd --uid 10001 --gid 10001 --home-dir /opt/key-networks/ztncui --no-create-home ztncui \
     && mkdir -p /usr/share/ztncui-defaults \
     && cp -a /opt/key-networks/ztncui/etc/. /usr/share/ztncui-defaults/ \
+    && chown -R ztncui:ztncui /opt/key-networks/ztncui \
     && chown -R ztncui:ztncui /usr/share/ztncui-defaults \
+    && chmod 0755 /opt/key-networks /opt/key-networks/ztncui \
     && rm -rf /opt/key-networks/ztncui/etc \
     && install -d -o ztncui -g ztncui -m 0750 /opt/key-networks/ztncui/etc
 
@@ -305,7 +307,7 @@ wait_for_ztncui_container_ready() {
 
   for attempt in {1..30}; do
     if [[ "$(run_sudo_quiet docker inspect -f '{{.State.Running}}' "${NAIT_ZTNCUI_CONTAINER_NAME}" 2>/dev/null || true)" == "true" ]] \
-      && curl -fsS --max-time 2 http://127.0.0.1:3000/ >/dev/null; then
+      && curl -fsS --max-time 2 http://127.0.0.1:3000/ >/dev/null 2>&1; then
       [[ "${attempt}" -eq 1 ]] || printf '\n'
       return 0
     fi
