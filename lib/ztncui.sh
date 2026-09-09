@@ -13,13 +13,13 @@ validate_ztncui_version() {
 require_ztncui_prerequisites() {
   local command_name
 
-  for command_name in curl dpkg-query sha256sum ss systemctl; do
+  for command_name in curl dpkg-deb sha256sum ss systemctl; do
     command -v "${command_name}" >/dev/null 2>&1 \
       || die "Для ZTNCUI требуется команда: ${command_name}"
   done
 
   [[ "$(dpkg --print-architecture)" == "amd64" ]] \
-    || die "Официальный DEB-пакет ZTNCUI поддерживает только amd64."
+    || die "Закреплённый DEB-пакет ZTNCUI поддерживает только amd64."
 }
 
 ztncui_expected_checksum() {
@@ -39,11 +39,11 @@ require_local_controller_for_ztncui() {
   is_controller_host \
     || die "Локальный ZeroTier Controller не найден. Сначала выберите пункт 1."
   run_sudo_quiet test -r /var/lib/zerotier-one/authtoken.secret \
-    || die "Не удалось прочитать token локального ZeroTier controller."
+    || die "Не удалось прочитать token локального ZeroTier Controller."
   controller_token="$(run_sudo_quiet cat /var/lib/zerotier-one/authtoken.secret)"
-  [[ -n "${controller_token}" ]] || die "Token локального ZeroTier controller пуст."
+  [[ -n "${controller_token}" ]] || die "Token локального ZeroTier Controller пуст."
   curl -fsS --max-time 3 -H "X-ZT1-Auth: ${controller_token}" "${ZT_LOCAL_API}/status" >/dev/null \
-    || die "Локальный ZeroTier controller API недоступен на ${ZT_LOCAL_API}."
+    || die "Локальный ZeroTier Controller API недоступен на ${ZT_LOCAL_API}."
 }
 
 ztncui_deb_filename() {
@@ -87,51 +87,239 @@ prepare_ztncui_package() {
   fi
 }
 
-write_ztncui_env() {
+native_ztncui_is_installed() {
+  dpkg-query -W -f='${db:Status-Status}' ztncui 2>/dev/null | grep -qx installed
+}
+
+ztncui_container_exists() {
+  command -v docker >/dev/null 2>&1 || return 1
+  run_sudo_quiet docker container inspect "${NAIT_ZTNCUI_CONTAINER_NAME}" >/dev/null 2>&1
+}
+
+docker_compose_available() {
+  command -v docker >/dev/null 2>&1 || return 1
+  run_sudo_quiet docker compose version >/dev/null 2>&1
+}
+
+install_docker_from_official_repo() {
+  local architecture
+  local codename
+  local os_id
+  local sources_file
+
+  # shellcheck disable=SC1091
+  os_id="$(. /etc/os-release && printf '%s' "${ID:-}")"
+  # shellcheck disable=SC1091
+  codename="$(. /etc/os-release && printf '%s' "${UBUNTU_CODENAME:-${VERSION_CODENAME:-}}")"
+  architecture="$(dpkg --print-architecture)"
+
+  [[ "${os_id}" == "ubuntu" ]] \
+    || die "Автоматическая установка Docker поддерживается только на Ubuntu."
+  [[ -n "${codename}" ]] || die "Не удалось определить codename Ubuntu для Docker repository."
+
+  log_info "Подключаю официальный Docker APT repository."
+  run_sudo apt-get update
+  run_sudo apt-get install -y ca-certificates curl
+  run_sudo install -m 0755 -d /etc/apt/keyrings
+  run_sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+    -o /etc/apt/keyrings/docker.asc
+  run_sudo chmod a+r /etc/apt/keyrings/docker.asc
+
+  sources_file="$(mktemp)"
+  cat > "${sources_file}" <<EOF
+Types: deb
+URIs: https://download.docker.com/linux/ubuntu
+Suites: ${codename}
+Components: stable
+Architectures: ${architecture}
+Signed-By: /etc/apt/keyrings/docker.asc
+EOF
+  run_sudo install -m 0644 "${sources_file}" /etc/apt/sources.list.d/docker.sources
+  rm -f "${sources_file}"
+
+  run_sudo apt-get update
+  run_sudo apt-get install -y \
+    docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+}
+
+ensure_docker_for_ztncui() {
+  if ! command -v docker >/dev/null 2>&1; then
+    install_docker_from_official_repo
+  fi
+
+  run_sudo_quiet systemctl enable --now docker >/dev/null 2>&1 \
+    || die "Docker установлен, но сервис docker не удалось запустить."
+  run_sudo_quiet docker info >/dev/null 2>&1 \
+    || die "Docker daemon недоступен."
+  docker_compose_available \
+    || die "Не найден Docker Compose plugin. Установите docker-compose-plugin и повторите попытку."
+}
+
+write_ztncui_container_files() {
+  local build_dir="${1:?build dir обязателен}"
   local controller_token
-  local tmp_env
 
   controller_token="$(run_sudo_quiet cat /var/lib/zerotier-one/authtoken.secret)"
-  [[ -n "${controller_token}" ]] || die "Token локального ZeroTier controller пуст."
-  tmp_env="$(mktemp)"
-  cat > "${tmp_env}" <<EOF
+  [[ -n "${controller_token}" ]] || die "Token локального ZeroTier Controller пуст."
+
+  cat > "${build_dir}/Dockerfile" <<'EOF'
+FROM ubuntu:24.04
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates libstdc++6 openssl passwd \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY ztncui.deb /tmp/ztncui.deb
+RUN dpkg-deb -x /tmp/ztncui.deb / \
+    && rm -f /tmp/ztncui.deb \
+    && groupadd --gid 10001 ztncui \
+    && useradd --uid 10001 --gid 10001 --home-dir /opt/key-networks/ztncui --no-create-home ztncui \
+    && mkdir -p /usr/share/ztncui-defaults \
+    && cp -a /opt/key-networks/ztncui/etc/. /usr/share/ztncui-defaults/ \
+    && chown -R ztncui:ztncui /usr/share/ztncui-defaults \
+    && rm -rf /opt/key-networks/ztncui/etc \
+    && install -d -o ztncui -g ztncui -m 0750 /opt/key-networks/ztncui/etc
+
+COPY entrypoint.sh /usr/local/bin/ztncui-entrypoint
+RUN chmod 0755 /usr/local/bin/ztncui-entrypoint
+
+USER 10001:10001
+WORKDIR /opt/key-networks/ztncui
+ENTRYPOINT ["/usr/local/bin/ztncui-entrypoint"]
+CMD ["/opt/key-networks/ztncui/ztncui"]
+EOF
+
+  cat > "${build_dir}/entrypoint.sh" <<'EOF'
+#!/bin/sh
+set -eu
+
+install -d -m 0750 etc/storage etc/tls
+
+if [ ! -f etc/default.passwd ]; then
+  install -m 0600 /usr/share/ztncui-defaults/default.passwd etc/default.passwd
+fi
+
+if [ ! -f etc/passwd ]; then
+  cp etc/default.passwd etc/passwd
+  chmod 0600 etc/passwd
+fi
+
+if [ ! -f etc/tls/privkey.pem ] || [ ! -f etc/tls/fullchain.pem ]; then
+  openssl req -x509 -sha256 -nodes -days 3650 -newkey rsa:4096 \
+    -keyout etc/tls/privkey.pem \
+    -out etc/tls/fullchain.pem \
+    -subj '/CN=localhost' >/dev/null 2>&1
+  chmod 0600 etc/tls/privkey.pem etc/tls/fullchain.pem
+fi
+
+exec "$@"
+EOF
+  chmod 0755 "${build_dir}/entrypoint.sh"
+
+  cat > "${build_dir}/.dockerignore" <<'EOF'
+*
+!Dockerfile
+!entrypoint.sh
+!ztncui.deb
+EOF
+
+  cat > "${build_dir}/docker-compose.yml" <<EOF
+services:
+  ztncui:
+    container_name: ${NAIT_ZTNCUI_CONTAINER_NAME}
+    image: ${NAIT_ZTNCUI_CONTAINER_IMAGE}
+    network_mode: host
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./data:/opt/key-networks/ztncui/etc
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    labels:
+      com.naitlab.component: ztncui
+      com.naitlab.version: "${NAIT_ZTNCUI_DEFAULT_VERSION}"
+EOF
+
+  cat > "${build_dir}/.env" <<EOF
 ZT_TOKEN=${controller_token}
 ZT_ADDR=127.0.0.1:9993
 NODE_ENV=production
 HTTP_PORT=3000
 EOF
-
-  backup_ztncui_env_if_exists
-  run_sudo install -o ztncui -g ztncui -m 0400 "${tmp_env}" "${NAIT_ZTNCUI_ENV_FILE}"
-  rm -f "${tmp_env}"
+  chmod 0600 "${build_dir}/.env"
 }
 
-backup_ztncui_env_if_exists() {
-  local timestamp
-  local backup_file
+install_ztncui_container_files() {
+  local build_dir="${1:?build dir обязателен}"
 
-  run_sudo_quiet test -f "${NAIT_ZTNCUI_ENV_FILE}" || return 0
-  timestamp="$(date '+%Y%m%d_%H%M%S')"
-  backup_file="${NAIT_ZTNCUI_ENV_FILE}.bak.${timestamp}"
-  log_warn "Существующий ZTNCUI config будет сохранён в backup: ${backup_file}"
-  run_sudo cp -a "${NAIT_ZTNCUI_ENV_FILE}" "${backup_file}"
+  run_sudo install -d -m 0750 "${NAIT_ZTNCUI_CONTAINER_DIR}"
+  run_sudo install -d -m 0750 "${NAIT_ZTNCUI_CONTAINER_DATA_DIR}"
+  run_sudo chown 10001:10001 "${NAIT_ZTNCUI_CONTAINER_DATA_DIR}"
+  run_sudo install -m 0644 "${build_dir}/Dockerfile" "${NAIT_ZTNCUI_CONTAINER_DIR}/Dockerfile"
+  run_sudo install -m 0755 "${build_dir}/entrypoint.sh" "${NAIT_ZTNCUI_CONTAINER_DIR}/entrypoint.sh"
+  run_sudo install -m 0644 "${build_dir}/.dockerignore" "${NAIT_ZTNCUI_CONTAINER_DIR}/.dockerignore"
+  run_sudo install -m 0644 "${build_dir}/docker-compose.yml" "${NAIT_ZTNCUI_CONTAINER_COMPOSE_FILE}"
+  run_sudo install -m 0600 "${build_dir}/.env" "${NAIT_ZTNCUI_CONTAINER_ENV_FILE}"
+  run_sudo install -m 0644 "${build_dir}/ztncui.deb" "${NAIT_ZTNCUI_CONTAINER_DIR}/ztncui.deb"
 }
 
-wait_for_ztncui_ready() {
-  for _ in {1..20}; do
-    if run_sudo_quiet systemctl is-active --quiet "${NAIT_ZTNCUI_SERVICE}" \
+build_ztncui_container_image() {
+  local build_log
+  local build_pid
+  local build_status
+
+  build_log="$(mktemp)"
+  printf '[INFO] Собираю контейнер ZTNCUI'
+  run_sudo docker build \
+    --tag "${NAIT_ZTNCUI_CONTAINER_IMAGE}" \
+    "${NAIT_ZTNCUI_CONTAINER_DIR}" >"${build_log}" 2>&1 &
+  build_pid=$!
+
+  while kill -0 "${build_pid}" 2>/dev/null; do
+    sleep 1
+    kill -0 "${build_pid}" 2>/dev/null && printf '.'
+  done
+
+  if wait "${build_pid}"; then
+    printf ' готово\n'
+    rm -f "${build_log}"
+    return 0
+  else
+    build_status=$?
+  fi
+
+  printf ' ошибка\n'
+  log_error "Не удалось собрать контейнер ZTNCUI. Технические подробности:"
+  tail -n 80 "${build_log}" >&2 || true
+  rm -f "${build_log}"
+  return "${build_status}"
+}
+
+wait_for_ztncui_container_ready() {
+  local attempt
+
+  for attempt in {1..30}; do
+    if [[ "$(run_sudo_quiet docker inspect -f '{{.State.Running}}' "${NAIT_ZTNCUI_CONTAINER_NAME}" 2>/dev/null || true)" == "true" ]] \
       && curl -fsS --max-time 2 http://127.0.0.1:3000/ >/dev/null; then
+      [[ "${attempt}" -eq 1 ]] || printf '\n'
       return 0
     fi
+    printf '.'
     sleep 1
   done
 
+  printf '\n'
   log_warn "ZTNCUI не стал доступен на http://127.0.0.1:3000. Последние строки журнала:"
-  run_sudo journalctl -u "${NAIT_ZTNCUI_SERVICE}" -n 50 --no-pager || true
+  run_sudo docker logs --tail 60 "${NAIT_ZTNCUI_CONTAINER_NAME}" || true
   return 1
 }
 
-verify_ztncui_local_bind() {
+verify_ztncui_container_local_bind() {
   local endpoints
   local endpoint
 
@@ -140,8 +328,8 @@ verify_ztncui_local_bind() {
 
   while IFS= read -r endpoint; do
     [[ "${endpoint}" == "127.0.0.1:3000" || "${endpoint}" == "[::1]:3000" ]] && continue
-    run_sudo systemctl stop "${NAIT_ZTNCUI_SERVICE}" || true
-    die "ZTNCUI открыл port 3000 не только на localhost (${endpoint}). Сервис остановлен."
+    run_sudo docker stop "${NAIT_ZTNCUI_CONTAINER_NAME}" >/dev/null || true
+    die "ZTNCUI открыл port 3000 не только на localhost (${endpoint}). Контейнер остановлен."
   done <<< "${endpoints}"
 }
 
@@ -149,36 +337,11 @@ get_installed_ztncui_version() {
   dpkg-query -W -f='${Version}\n' ztncui 2>/dev/null | sed 's/^[0-9]*://; s/-.*$//'
 }
 
-install_ztncui_package() {
-  local package="${1:?package обязателен}"
-  local install_log
-  local install_pid
-  local install_status
-
-  install_log="$(mktemp)"
-  printf '[INFO] Устанавливаю ZTNCUI и создаю TLS-сертификат'
-  DEBIAN_FRONTEND=noninteractive run_sudo apt-get install -y "${package}" \
-    >"${install_log}" 2>&1 &
-  install_pid=$!
-
-  while kill -0 "${install_pid}" 2>/dev/null; do
-    sleep 1
-    kill -0 "${install_pid}" 2>/dev/null && printf '.'
-  done
-
-  if wait "${install_pid}"; then
-    printf ' готово\n'
-    rm -f "${install_log}"
-    return 0
-  else
-    install_status=$?
-  fi
-
-  printf ' ошибка\n'
-  log_error "Не удалось установить ZTNCUI. Технические подробности:"
-  tail -n 60 "${install_log}" >&2 || true
-  rm -f "${install_log}"
-  return "${install_status}"
+get_container_ztncui_version() {
+  command -v docker >/dev/null 2>&1 || return 1
+  run_sudo_quiet docker inspect \
+    -f '{{index .Config.Labels "com.naitlab.version"}}' \
+    "${NAIT_ZTNCUI_CONTAINER_NAME}" 2>/dev/null
 }
 
 install_ztncui_interactive() {
@@ -188,56 +351,68 @@ install_ztncui_interactive() {
 
 install_ztncui() {
   local version
-  local staged_package
+  local build_dir
+  local docker_plan
 
   require_ztncui_prerequisites
   require_local_controller_for_ztncui
-  if dpkg-query -W -f='${db:Status-Status}' ztncui 2>/dev/null | grep -qx installed; then
-    die "ZTNCUI уже установлен. Инструкцию по обновлению смотрите в README."
-  fi
+
+  native_ztncui_is_installed \
+    && die "На хосте уже установлен ZTNCUI через DEB. Сначала удалите нативную установку, чтобы избежать конфликта port 3000."
+  ztncui_container_exists \
+    && die "Контейнер ${NAIT_ZTNCUI_CONTAINER_NAME} уже существует. Инструкцию по обновлению смотрите в README."
+  run_sudo_quiet test ! -e "${NAIT_ZTNCUI_CONTAINER_DIR}" \
+    || die "Каталог ${NAIT_ZTNCUI_CONTAINER_DIR} уже существует. Проверьте его содержимое перед повторной установкой."
+  [[ -z "$(run_sudo_quiet ss -H -ltn 'sport = :3000' || true)" ]] \
+    || die "TCP port 3000 уже занят. ZTNCUI не устанавливался."
 
   version="${NAIT_ZTNCUI_DEFAULT_VERSION}"
   validate_ztncui_version "${version}" || die "Некорректная версия ZTNCUI: ${version}"
 
+  if command -v docker >/dev/null 2>&1; then
+    docker_plan="будет использован установленный Docker"
+  else
+    docker_plan="будет установлен из официального Docker APT repository"
+  fi
+
   cat <<EOF
 
 План установки ZTNCUI:
-- Версия: ${version} (проверенная этим установщиком)
-- Источник: официальный DEB-пакет Key Networks или local offline package
-- Systemd service: ${NAIT_ZTNCUI_SERVICE}
+- ZeroTier One, Controller и Moon остаются на хосте
+- ZTNCUI ${version}: отдельный контейнер ${NAIT_ZTNCUI_CONTAINER_NAME}
+- Каталог контейнера: ${NAIT_ZTNCUI_CONTAINER_DIR}
+- Docker: ${docker_plan}
 - Web UI: http://127.0.0.1:3000
 - Внешние порты ZTNCUI: не открываются
-- Docker и PostgreSQL: не требуются
-- Изменение zerotier-one и существующих сетей: нет
+- Доступ: через SSH-туннель
+- Существующие сети ZeroTier: не изменяются
 
 EOF
-  confirm "Установить ZTNCUI по этому плану?" "N" || die "Установка ZTNCUI отменена."
+  confirm "Развернуть ZTNCUI по этому плану?" "N" || die "Установка ZTNCUI отменена."
 
-  staged_package="$(mktemp --suffix=.deb)"
-  log_info "Подготавливаю пакет ZTNCUI ${version}."
-  prepare_ztncui_package "${version}" "${staged_package}"
-  chmod 0644 "${staged_package}"
-  if ! install_ztncui_package "${staged_package}"; then
-    rm -f "${staged_package}"
-    die "Установка ZTNCUI завершилась с ошибкой."
-  fi
-  rm -f "${staged_package}"
+  ensure_docker_for_ztncui
 
-  run_sudo_quiet test -d "${NAIT_ZTNCUI_DIR}" \
-    || die "DEB-пакет не создал каталог ZTNCUI: ${NAIT_ZTNCUI_DIR}."
-  id ztncui >/dev/null 2>&1 || die "DEB-пакет не создал системного пользователя ztncui."
-  log_info "Подключаю ZTNCUI к локальному Controller."
-  write_ztncui_env
-  log_info "Запускаю веб-интерфейс ZTNCUI."
-  run_sudo_quiet systemctl enable --now "${NAIT_ZTNCUI_SERVICE}" >/dev/null 2>&1 \
-    || die "Не удалось запустить ZTNCUI."
-  wait_for_ztncui_ready || die "ZTNCUI не запустился; ZeroTier One не изменялся."
-  verify_ztncui_local_bind
-  log_info "ZTNCUI установлен и работает."
+  build_dir="$(mktemp -d)"
+  prepare_ztncui_package "${version}" "${build_dir}/ztncui.deb"
+  write_ztncui_container_files "${build_dir}"
+  install_ztncui_container_files "${build_dir}"
+  rm -rf "${build_dir}"
 
-  cat <<'EOF'
+  build_ztncui_container_image || die "Сборка ZTNCUI завершилась с ошибкой. ZeroTier One не изменялся."
+  log_info "Запускаю контейнер ${NAIT_ZTNCUI_CONTAINER_NAME}."
+  run_sudo docker compose -f "${NAIT_ZTNCUI_CONTAINER_COMPOSE_FILE}" up -d \
+    || die "Не удалось запустить контейнер ${NAIT_ZTNCUI_CONTAINER_NAME}."
+  wait_for_ztncui_container_ready \
+    || die "ZTNCUI не запустился; ZeroTier One и Controller не изменялись."
+  verify_ztncui_container_local_bind
+  log_info "ZTNCUI установлен и работает в контейнере ${NAIT_ZTNCUI_CONTAINER_NAME}."
+
+  cat <<EOF
 
 Веб-интерфейс ZTNCUI установлен и подключён к ZeroTier Controller.
+- Контейнер: ${NAIT_ZTNCUI_CONTAINER_NAME}
+- Файлы: ${NAIT_ZTNCUI_CONTAINER_DIR}
+
 Прокинь SSH-туннель: (смотри README)
 Браузер: http://127.0.0.1:3000
 Первый вход: admin / password

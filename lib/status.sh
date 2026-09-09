@@ -174,20 +174,45 @@ status_print_processed_ztr_block() {
 }
 
 status_print_ztncui_block() {
+  local container_state=""
+  local container_version=""
+  local native_installed="no"
   local service_state=""
   local version=""
 
   echo "ZTNCUI:"
 
-  if [[ ! -f "/etc/systemd/system/${NAIT_ZTNCUI_SERVICE}" ]] \
-    && [[ ! -f "/lib/systemd/system/${NAIT_ZTNCUI_SERVICE}" ]] \
-    && [[ ! -f "/usr/lib/systemd/system/${NAIT_ZTNCUI_SERVICE}" ]]; then
+  if native_ztncui_is_installed; then
+    native_installed="yes"
+  fi
+
+  if ztncui_container_exists; then
+    container_state="$(run_sudo_quiet docker inspect -f '{{.State.Status}}' "${NAIT_ZTNCUI_CONTAINER_NAME}" 2>/dev/null || true)"
+    container_version="$(get_container_ztncui_version 2>/dev/null || true)"
+    echo "- Режим: Docker container"
+    echo "- Контейнер: ${NAIT_ZTNCUI_CONTAINER_NAME}"
+    echo "- Статус: ${container_state:-неизвестно}"
+    echo "- Версия: ${container_version:-не удалось определить}"
+    echo "- Файлы: ${NAIT_ZTNCUI_CONTAINER_DIR}"
+    if [[ "${container_state}" == "running" ]]; then
+      echo "- Веб-интерфейс доступен: http://127.0.0.1:3000 (после прокидывания SSH-туннеля)"
+    else
+      echo "- Веб-интерфейс недоступен: контейнер не запущен"
+    fi
+    if [[ "${native_installed}" == "yes" ]]; then
+      echo "- Внимание: одновременно найден нативный ZTNCUI; возможен конфликт port 3000"
+    fi
+    return 0
+  fi
+
+  if [[ "${native_installed}" != "yes" ]]; then
     echo "- Статус: не установлен"
     return 0
   fi
 
   service_state="$(systemctl is-active "${NAIT_ZTNCUI_SERVICE}" 2>/dev/null || true)"
   version="$(get_installed_ztncui_version 2>/dev/null || true)"
+  echo "- Режим: нативная установка (legacy)"
   echo "- Статус: ${service_state:-неизвестно}"
   echo "- Версия: ${version:-не удалось определить}"
   if [[ "${service_state}" == "active" ]]; then
