@@ -44,8 +44,38 @@ moon_public_filename() {
   printf '000000%s.moon\n' "${moon_id,,}"
 }
 
+moon_export_user() {
+  if [[ "${EUID}" -eq 0 && -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
+    printf '%s\n' "${SUDO_USER}"
+    return 0
+  fi
+
+  id -un
+}
+
 moon_export_dir() {
-  printf '%s\n' "${REPO_ROOT}"
+  local export_user=""
+  local export_dir=""
+
+  export_user="$(moon_export_user)"
+  export_dir="$(getent passwd "${export_user}" 2>/dev/null | awk -F: 'NR == 1 {print $6}' || true)"
+
+  [[ -n "${export_dir}" && "${export_dir}" == /* && -d "${export_dir}" ]] \
+    || die "Не удалось определить домашний каталог пользователя ${export_user}."
+
+  printf '%s\n' "${export_dir}"
+}
+
+install_moon_export_file() {
+  local source_file="${1:?source file обязателен}"
+  local destination_file="${2:?destination file обязателен}"
+  local export_user=""
+  local export_group=""
+
+  export_user="$(moon_export_user)"
+  export_group="$(id -gn "${export_user}")"
+  run_sudo install -o "${export_user}" -g "${export_group}" -m 0644 \
+    "${source_file}" "${destination_file}"
 }
 
 moon_list_ids() {
@@ -189,9 +219,10 @@ show_existing_controller_moon() {
   [[ -n "${moon_id}" ]] || die "Сохранённая конфигурация Moon повреждена: ${NAIT_ZTR_MOON_CONFIG_FILE}"
   public_filename="$(moon_public_filename "${moon_id}")"
   public_file="$(moon_export_dir)/${public_filename}"
-  if [[ ! -f "${public_file}" ]]; then
-    public_file="${NAIT_ZTR_MOON_CONFIG_DIR}/${public_filename}"
-  fi
+  run_sudo_quiet test -f "${NAIT_ZTR_MOON_CONFIG_DIR}/${public_filename}" \
+    || die "Публичный файл Moon не найден: ${NAIT_ZTR_MOON_CONFIG_DIR}/${public_filename}"
+  install_moon_export_file \
+    "${NAIT_ZTR_MOON_CONFIG_DIR}/${public_filename}" "${public_file}"
 
   cat <<EOF
 
@@ -292,8 +323,7 @@ EOF
   run_sudo install -o zerotier-one -g zerotier-one -m 0644 \
     "${generated_file}" "${NAIT_ZTR_MOONS_DIR}/${public_filename}"
 
-  install -d -m 0755 "${export_dir}"
-  install -m 0644 "${generated_file}" "${export_file}"
+  install_moon_export_file "${generated_file}" "${export_file}"
   open_moon_ufw_port_if_needed
   run_sudo systemctl restart zerotier-one
 
