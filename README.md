@@ -1,6 +1,8 @@
 # Nait ZTR Installer
 
-Нужно добавить VPS и домашние устройства в одну локалку? Этот инсталлер поможет развернуть свою ZeroTier-сеть и управлять ей через веб-интерфейс.
+**Версия: 0.8.1**
+
+Инсталлер сети ZeroTier с веб-интерфейсом ZTNCUI и настройкой шлюза для выхода в интернет.
 
 ## Установка
 
@@ -16,33 +18,22 @@ https://api.github.com/repos/NaitSide/Nait_ZTR_Installer/tarball/main \
 && ./install.sh
 ```
 
+![Меню Nait ZTR Installer](img/Nait-ZTR-Installer-menu.png)
+
 > Для обычной сети создай её через пункт 3 или ZTNCUI.
 > Для выхода в интернет через VPS выбери пункт 10 — VPN Edition.
 
-## 10) VPN Edition
+## VPN Edition (пункт 10)
 
 Поочерёдно запускает пункты 1 → 3 → 7 → 8: контроллер, создание сети, Moon и настройка шлюза. Позволяет использовать сеть ZeroTier как VPN после включения **Allow Default Route Override** на клиенте.
 
-## Отдельная настройка шлюза
+Также рекомендуется включить **Allow DNS Configuration**, чтобы использовать DNS-серверы `8.8.8.8` и `1.1.1.1`, которые VPN Edition прописывает в контроллере. Если в выбранной сети уже заданы другие DNS, установщик предложит их заменить.
 
-Пункт 8 подключает этот VPS к выбранной сети ZeroTier и настраивает IPv4-шлюз. На локальном контроллере маршрут добавляется автоматически; для удалённого контроллера установщик покажет, что прописать вручную. Устройства нужно одобрять через ZTNCUI или пункт 5. DNS и IPv6 настраиваются отдельно.
+![Allow Default Route Override в клиенте ZeroTier для Windows](img/ZeroTier-Allow-Default-Route-Override.png)
 
-## Проверка изменений
+## Отдельная настройка шлюза (пункт 8)
 
-```bash
-python3 -m unittest discover -s tests -v
-bash tests/test_shell.sh
-```
-
-Изолированная проверка жизненного цикла firewall (только Ubuntu/Linux с unshare,
-iptables и root; скрипт откажется работать в исходном namespace):
-
-```bash
-sudo env NAIT_HOST_NETNS="$(readlink /proc/self/ns/net)" unshare --net --fork bash tests/test_firewall.sh
-```
-
-Синтаксис shell проверяется `bash -n install.sh` и `bash -n lib/*.sh`
-(каждый файл проверять отдельным вызовом). CLI мастера шлюза: `./install.sh gateway`.
+Подключает этот VPS к выбранной сети ZeroTier и настраивает IPv4-шлюз. На локальном контроллере маршрут добавляется автоматически; для удалённого контроллера установщик покажет, что прописать вручную. Устройства нужно одобрять через ZTNCUI или пункт 5. DNS и IPv6 настраиваются отдельно.
 
 ## Что такое ZeroTier?
 
@@ -77,11 +68,6 @@ Nait ZTR Installer - это интерактивный инсталлер кот
 
 
 
-## Меню
-
-![Меню Nait ZTR Installer](img/Nait-ZTR-Installer-menu.png)
-
-
 ## Доступ к ZTNCUI
 
 Нужно прокинуть SSH тунель (Port Forwarding)
@@ -110,14 +96,6 @@ Nait ZTR Installer - это интерактивный инсталлер кот
 ```
 
 Перед обновлением сделай backup `/opt/naitlab/ztncui_box` и `/var/lib/zerotier-one/controller.d`. Не меняй файлы в `controller.d` вручную при запущенном `zerotier-one`.
-
-## Проверка перед запуском
-
-```bash
-bash -n install.sh
-for file in lib/*.sh; do bash -n "$file"; done
-./install.sh help
-```
 
 ## Планеты и Луны — WTF?
 

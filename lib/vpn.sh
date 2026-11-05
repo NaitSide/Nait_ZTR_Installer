@@ -42,6 +42,22 @@ vpn_select_network() {
   NAIT_ZTR_VPN_NETWORK="${NAIT_ZTR_CREATED_NETWORK_ID}"
 }
 
+vpn_configure_dns() {
+  local network="${1:?Network ID обязателен}" plan expected
+  plan="$(run_sudo_quiet python3 "${REPO_ROOT}/lib/vpn_dns.py" plan --network "${network}")"
+  expected="$(jq -c '.dns' <<< "${plan}")"
+  if [[ "$(jq -r '.conflict' <<< "${plan}")" == true ]]; then
+    jq -r '"Текущие DNS сети: " + (.dns.servers | join(", "))' <<< "${plan}"
+    if ! confirm "Заменить DNS этой сети на 8.8.8.8 и 1.1.1.1?" "N"; then
+      log_info "Существующие DNS сети сохранены."
+      return 0
+    fi
+  fi
+  run_sudo_quiet python3 "${REPO_ROOT}/lib/vpn_dns.py" apply --network "${network}" --expected-dns "${expected}" >/dev/null
+  log_info "DNS сети: 8.8.8.8 и 1.1.1.1."
+  echo 'На клиенте рекомендуется включить Allow DNS Configuration.'
+}
+
 vpn_edition_run() {
   local state replace=no
   preflight_common
@@ -70,5 +86,6 @@ vpn_edition_run() {
   fi
   gateway_setup_interactive "${replace}" "${NAIT_ZTR_VPN_NETWORK}"
   [[ "${NAIT_ZTR_GATEWAY_COMPLETED:-0}" == 1 ]] || die "Настройка шлюза не завершена."
+  vpn_configure_dns "${NAIT_ZTR_VPN_NETWORK}"
   log_info "VPN Edition: серверная настройка завершена."
 }

@@ -22,3 +22,6 @@ __pycache__/
 /lib/zerotier-edge.sh
 /lib/ztnet.sh
 /cleanup_legacy_files.bat
+
+# Internal development checks are kept outside this repository.
+/tests/
