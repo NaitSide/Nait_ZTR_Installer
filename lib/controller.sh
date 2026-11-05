@@ -106,10 +106,11 @@ create_network_interactive() {
 
   while true; do
     network_cidr="$(prompt_with_default "Адрес сети (CIDR)" "${NAIT_ZTR_DEFAULT_NETWORK_CIDR}")"
-    if validate_cidr "${network_cidr}"; then
+    if validate_cidr "${network_cidr}" && first_usable_ip_from_cidr "${network_cidr}" >/dev/null; then
+      network_cidr="$(python3 -c 'import ipaddress,sys; print(ipaddress.IPv4Network(sys.argv[1], strict=False))' "${network_cidr}")"
       break
     fi
-    log_warn "Некорректный адрес сети: ${network_cidr}"
+    log_warn "Нужна IPv4-подсеть с адресами для шлюза и клиентов (префикс не длиннее /30): ${network_cidr}"
   done
 
   controller_ip="$(first_usable_ip_from_cidr "${network_cidr}")" \
@@ -120,8 +121,9 @@ create_network_interactive() {
 План создания сети:
 - Имя: ${network_name}
 - Адрес сети (CIDR): ${network_cidr}
-- IP Controller: ${controller_ip}
-- Автоматический пул адресов: ${controller_ip}–$(last_usable_ip_from_cidr "${network_cidr}")
+- Адрес для будущего шлюза: ${controller_ip} (зарезервирован)
+- Автоматический пул адресов: $(python3 -c 'import ipaddress,sys; print(ipaddress.IPv4Address(sys.argv[1])+1)' "${controller_ip}")–$(last_usable_ip_from_cidr "${network_cidr}")
+- Подключение текущего VPS и настройка шлюза: отдельно, пункт 8
 - Сеть: private
 
 EOF
@@ -134,18 +136,16 @@ create_network() {
   local network_name="${1:?network name обязателен}"
   local network_cidr="${2:?network cidr обязателен}"
   local controller_ip="${3:?controller ip обязателен}"
-  local controller_node_id
   local network_id
+  local pool_start
   local pool_end
 
-  controller_node_id="$(get_zt_node_id_quiet)"
+  pool_start="$(python3 -c 'import ipaddress,sys; print(ipaddress.IPv4Address(sys.argv[1])+1)' "${controller_ip}")"
   pool_end="$(last_usable_ip_from_cidr "${network_cidr}")"
   network_id="$(create_controller_network)"
   [[ -n "${network_id}" ]] || die "Controller API не вернул Network ID."
 
-  update_controller_network "${network_id}" "${network_name}" "${network_cidr}" "${controller_ip}" "${pool_end}" >/dev/null
-  authorize_zt_node_with_ip "${network_id}" "${controller_node_id}" "${controller_ip}" >/dev/null
-  zt_join_network "${network_id}"
+  update_controller_network "${network_id}" "${network_name}" "${network_cidr}" "${pool_start}" "${pool_end}" >/dev/null
 
   cat <<EOF
 
@@ -153,7 +153,8 @@ create_network() {
 - Network ID: ${network_id}
 - Имя: ${network_name}
 - Адрес сети: ${network_cidr}
-- IP Controller: ${controller_ip}
+- Зарезервированный адрес будущего шлюза: ${controller_ip}
+- Узел к сети пока не подключён. Для шлюза выберите пункт 8.
 
 EOF
 }

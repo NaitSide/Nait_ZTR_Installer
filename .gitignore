@@ -7,6 +7,8 @@ data/
 .DS_Store
 .vscode/
 .idea/
+__pycache__/
+*.py[cod]
 
 # Local archive from the private prototype. These files are intentionally not
 # included in the first public version of the installer.

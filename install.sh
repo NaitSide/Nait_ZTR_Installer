@@ -20,6 +20,8 @@ source "${REPO_ROOT}/lib/moon.sh"
 source "${REPO_ROOT}/lib/node.sh"
 # shellcheck source=lib/authorize.sh
 source "${REPO_ROOT}/lib/authorize.sh"
+# shellcheck source=lib/gateway.sh
+source "${REPO_ROOT}/lib/gateway.sh"
 # shellcheck source=lib/status.sh
 source "${REPO_ROOT}/lib/status.sh"
 
@@ -36,6 +38,7 @@ Nait_ZTR_Installer
   ./install.sh authorize-node --network-id <NETWORK_ID> --node-id <NODE_ID> [--ip <IP>]
   ./install.sh ztncui-install
   ./install.sh moon
+  ./install.sh gateway
   ./install.sh status
   ./install.sh help
 
@@ -46,6 +49,7 @@ Nait_ZTR_Installer
   join-network     Подключить текущий узел к сети по Network ID.
   authorize-node   Одобрить узел на локальном Controller.
   moon             Создать Moon на Controller или подключить её на узле.
+  gateway          Настроить, проверить или отключить IPv4-шлюз ZeroTier.
 EOF
 }
 
@@ -63,8 +67,9 @@ Nait ZTR Installer v${NAIT_ZTR_INSTALLER_VERSION} (MVP)
 5) Одобрить узел в сети ZeroTier (CLI)
 6) Установить ZTNCUI (в контейнере)
 7) Резервная Moon: создать на Controller / подключить на клиенте
-8) Статус
-9) Выход
+8) Настроить этот узел как шлюз в интернет
+9) Статус
+10) Выход
 
 EOF
 }
@@ -72,7 +77,7 @@ EOF
 interactive_menu() {
   while true; do
     show_menu
-    choice="$(read_user_input "Выберите пункт [1-9]: ")"
+    choice="$(read_user_input "Выберите пункт [1-10]: ")"
     case "${choice}" in
       1) install_controller_interactive ;;
       2) install_client_interactive ;;
@@ -81,8 +86,9 @@ interactive_menu() {
       5) authorize_node_interactive ;;
       6) install_ztncui_interactive ;;
       7) configure_moon_interactive ;;
-      8) show_status ;;
-      9) log_info "Выход."; return 0 ;;
+      8) configure_gateway_interactive ;;
+      9) show_status ;;
+      10) log_info "Выход."; return 0 ;;
       *) log_warn "Неизвестный пункт меню: ${choice}" ;;
     esac
   done
@@ -148,6 +154,11 @@ dispatch() {
         die "Команда status не принимает аргументы."
       fi
       show_status
+      ;;
+    gateway)
+      shift
+      [[ "$#" -eq 0 ]] || die "Команда gateway не принимает аргументы."
+      configure_gateway_interactive
       ;;
     help|-h|--help)
       print_help

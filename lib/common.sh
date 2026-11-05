@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 
-NAIT_ZTR_INSTALLER_VERSION="0.6.0"
+NAIT_ZTR_INSTALLER_VERSION="0.7.0"
 NAIT_ZTR_DEFAULT_NETWORK_NAME="ztr_net"
-NAIT_ZTR_DEFAULT_NETWORK_CIDR="10.0.1.0/24"
-NAIT_ZTR_DEFAULT_CORE_IP="10.0.1.1"
+NAIT_ZTR_DEFAULT_NETWORK_CIDR="10.77.77.0/24"
+NAIT_ZTR_DEFAULT_CORE_IP="10.77.77.1"
 NAIT_ZTR_CONFIG_DIR="/etc/naitlab/zerotier"
 NAIT_ZTR_CONFIG_FILE="${NAIT_ZTR_CONFIG_DIR}/zerotier.env"
 NAIT_ZTR_CONTROLLER_MARKER="${NAIT_ZTR_CONFIG_DIR}/controller.enabled"
@@ -305,10 +305,9 @@ import ipaddress
 import sys
 
 network = ipaddress.IPv4Network(sys.argv[1], strict=False)
-hosts = list(network.hosts())
-if not hosts:
+if network.prefixlen > 30:
     sys.exit(1)
-print(hosts[0])
+print(network.network_address + 1)
 PY
 }
 
@@ -319,10 +318,9 @@ import ipaddress
 import sys
 
 network = ipaddress.IPv4Network(sys.argv[1], strict=False)
-hosts = list(network.hosts())
-if not hosts:
+if network.prefixlen > 30:
     sys.exit(1)
-print(hosts[-1])
+print(network.broadcast_address - 1)
 PY
 }
 

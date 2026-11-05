@@ -101,6 +101,91 @@ docker_compose_available() {
   run_sudo_quiet docker compose version >/dev/null 2>&1
 }
 
+compose_package_for_docker() {
+  local status
+  status="$(dpkg-query -W -f='${db:Status-Status}' docker-ce-cli 2>/dev/null || true)"
+  if [[ "${status}" == "installed" ]]; then
+    printf '%s\n' docker-compose-plugin
+    return 0
+  fi
+  status="$(dpkg-query -W -f='${db:Status-Status}' docker.io 2>/dev/null || true)"
+  if [[ "${status}" == "installed" ]]; then
+    printf '%s\n' docker-compose-v2
+    return 0
+  fi
+  return 1
+}
+
+find_offline_compose_package() {
+  local package_name="${1:?package name обязателен}"
+  local package architecture os_id version_id
+  architecture="$(dpkg --print-architecture)"
+  os_id="$(. /etc/os-release && printf '%s' "${ID:-}")"
+  version_id="$(. /etc/os-release && printf '%s' "${VERSION_ID:-}")"
+  # The bundled Ubuntu package is pinned to this tested target.
+  [[ "${os_id}" == ubuntu && "${version_id}" == 24.04 && "${architecture}" == amd64 ]] || return 1
+  while IFS= read -r package; do
+    [[ "$(dpkg-deb -f "${package}" Package 2>/dev/null || true)" == "${package_name}" ]] || continue
+    [[ "$(dpkg-deb -f "${package}" Architecture 2>/dev/null || true)" == "${architecture}" ]] || continue
+    printf '%s\n' "${package}"
+    return 0
+  done < <(find "${NAIT_ZTR_OFFLINE_DIR}" -maxdepth 1 -type f -name "${package_name}_*.deb" -print 2>/dev/null | sort -Vr)
+  return 1
+}
+
+verify_offline_compose_package() {
+  local package="${1:?package обязателен}" expected actual filename
+  filename="$(basename "${package}")"
+  [[ -f "${NAIT_ZTR_OFFLINE_DIR}/SHA256SUMS" ]] || die "Отсутствует SHA256SUMS для Compose."
+  expected="$(awk -v file="${filename}" '{sub(/\r$/, "", $2)} $2 == file {print $1}' "${NAIT_ZTR_OFFLINE_DIR}/SHA256SUMS")"
+  [[ "${expected}" =~ ^[0-9a-fA-F]{64}$ ]] || die "Для Compose нет единственной корректной записи SHA-256."
+  actual="$(sha256sum "${package}" | awk '{print $1}')"
+  [[ "${actual,,}" == "${expected,,}" ]] || die "SHA-256 Compose не совпадает. Установка остановлена."
+}
+
+compose_install_plan_is_safe() {
+  local plan
+  plan="$(run_sudo_quiet apt-get -s install --no-install-recommends "$@")" || return 1
+  # Never replace or upgrade an existing Docker engine just to add Compose.
+  if printf '%s\n' "${plan}" | grep -E '^Remv |^Inst (docker\.io|docker-ce|docker-ce-cli|containerd|containerd\.io|runc) ' >/dev/null; then
+    log_error "Установка Compose требует удаления пакетов или изменения Docker. Автоматическая установка отменена."
+    return 1
+  fi
+}
+
+ensure_docker_compose() {
+  local package_name offline_package temp_dir local_package
+  docker_compose_available && return 0
+  package_name="$(compose_package_for_docker)" \
+    || die "Docker найден, но его пакетный источник не определён. Установите совместимый Compose вручную."
+  offline_package="$(find_offline_compose_package "${package_name}" || true)"
+  if [[ -n "${offline_package}" ]]; then
+    verify_offline_compose_package "${offline_package}"
+    temp_dir="$(mktemp -d)"
+    chmod 0755 "${temp_dir}"
+    local_package="${temp_dir}/$(basename "${offline_package}")"
+    install -m 0644 "${offline_package}" "${local_package}"
+    log_info "Установка Compose из локального пакета: $(basename "${offline_package}")."
+    if ! compose_install_plan_is_safe "${local_package}"; then
+      rm -f "${local_package}"; rmdir "${temp_dir}"
+      die "Не удалось построить безопасный план установки Compose."
+    fi
+    if run_sudo apt-get install -y --no-install-recommends --no-download "${local_package}"; then
+      rm -f "${local_package}"; rmdir "${temp_dir}"
+      docker_compose_available || die "Compose установлен, но команда docker compose недоступна."
+      return 0
+    fi
+    rm -f "${local_package}"; rmdir "${temp_dir}"
+    log_warn "Для локального Compose недостаёт зависимостей. Попробую пакетный репозиторий."
+  else
+    log_info "Совместимого локального Compose нет. Установка ${package_name} из пакетного репозитория."
+  fi
+  run_sudo apt-get update
+  compose_install_plan_is_safe "${package_name}" || die "Безопасная установка Compose недоступна."
+  run_sudo apt-get install -y --no-install-recommends "${package_name}"
+  docker_compose_available || die "Команда docker compose недоступна после установки."
+}
+
 install_docker_from_official_repo() {
   local architecture
   local codename
@@ -151,8 +236,7 @@ ensure_docker_for_ztncui() {
     || die "Docker установлен, но сервис docker не удалось запустить."
   run_sudo_quiet docker info >/dev/null 2>&1 \
     || die "Docker daemon недоступен."
-  docker_compose_available \
-    || die "Не найден Docker Compose plugin. Установите docker-compose-plugin и повторите попытку."
+  ensure_docker_compose
 }
 
 write_ztncui_container_files() {

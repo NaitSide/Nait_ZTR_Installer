@@ -99,7 +99,7 @@ status_print_processed_ztr_block() {
   local missing_network_text="Сеть ZeroTier: не подключена"
 
   if [[ "${inferred_role}" == "ZeroTier Controller" ]]; then
-    missing_network_text="Сеть ZeroTier: не создана"
+    missing_network_text="Узел не подключён к сети ZeroTier. Созданные сети смотрите в ZTNCUI; для шлюза используйте пункт 8."
   fi
 
   if ! is_zerotier_installed; then
@@ -298,6 +298,9 @@ show_status() {
   print_root_connectivity_summary
   echo
   status_print_ufw_block
+  echo
+
+  gateway_print_status
   echo
 
   status_separator
