@@ -9,6 +9,7 @@ from pathlib import Path
 import re
 import shlex
 import shutil
+import socket
 import subprocess
 import sys
 import time
@@ -191,8 +192,53 @@ def plan(nwid, wan=None):
     if wan == zt_interface or wan.startswith(('zt', 'docker', 'veth')):
         raise GatewayError('Внешний интерфейс не должен быть интерфейсом ZeroTier или Docker.')
     run(['ip', 'link', 'show', 'dev', wan])
+    defaults = default_routes(row.get('routes', [])) if controlled else []
     return {'network': nwid, 'name': choices[nwid]['name'], 'controller': controlled, 'node': node,
+        'default_conflict': bool(defaults and defaults != [exit_route(address)]),
+        'current_defaults': defaults,
         'subnet': subnet.with_prefixlen, 'gateway': address, 'zt_interface': zt_interface, 'wan_interface': wan}
+
+
+def default_routes(routes):
+    return [r for r in routes if r.get('target') == '0.0.0.0/0']
+
+
+def exit_route(address):
+    return {'target': '0.0.0.0/0', 'via': address}
+
+
+def ensure_default_route(p, replace_default=False):
+    if not p['controller']:
+        return None
+    path = 'controller/network/' + p['network']
+    routes = api(path).get('routes', [])
+    previous = default_routes(routes)
+    desired = exit_route(p['gateway'])
+    if previous == [desired]:
+        return None
+    if previous and not replace_default:
+        raise GatewayError('В сети уже задан другой маршрут по умолчанию. Подтвердите его замену в пункте 8.')
+    change = {'before': previous, 'installed': desired}
+    try:
+        api(path, {'routes': [r for r in routes if r.get('target') != '0.0.0.0/0'] + [desired]})
+        if default_routes(api(path).get('routes', [])) != [desired]:
+            raise GatewayError('Controller не подтвердил маршрут по умолчанию.')
+    except Exception:
+        restore_default_route(p['network'], change)
+        raise
+    return change
+
+
+def restore_default_route(nwid, change):
+    if not change:
+        return True
+    path = 'controller/network/' + nwid
+    routes = api(path).get('routes', [])
+    # Never overwrite routes edited by the administrator after our installation.
+    if default_routes(routes) != [change['installed']]:
+        return False
+    api(path, {'routes': [r for r in routes if r.get('target') != '0.0.0.0/0'] + change['before']})
+    return True
 
 
 def write(path, content, mode):
@@ -276,6 +322,7 @@ def restore_membership(p, previous_local, previous_member):
             api(member_path, method='DELETE', optional=True)
         else:
             payload = {k: previous_member[k] for k in ('authorized', 'ipAssignments', 'noAutoAssignIps', 'name') if k in previous_member}
+            payload.setdefault('name', '')
             api(member_path, payload)
     if previous_local is None:
         api('network/' + p['network'], method='DELETE', optional=True)
@@ -299,26 +346,45 @@ def disable():
     run(['systemctl', 'disable', '--now', SERVICE])
     if SCRIPT.exists():
         run([str(SCRIPT), 'stop'])
+    restored = restore_default_route(state['network'], state.get('route_change'))
     cleanup_files()
-    return {'configured': False, 'message': 'Правила шлюза удалены. Сеть, адрес узла, Controller и Moon сохранены. Удалите маршрут 0.0.0.0/0 через этот узел из ZTNCUI. Общий ip_forward оставлен без изменения.'}
+    message = 'Шлюз отключён. Сеть, адрес узла, Controller и Moon сохранены.'
+    if not restored or not state.get('route_change'):
+        message += ' Проверьте маршрут по умолчанию на Controller.'
+    return {'configured': False, 'message': message}
 
 
-def apply(nwid, wan=None, replace=False):
+def apply(nwid, wan=None, replace=False, replace_default=False):
     p = plan(nwid, wan)
+    if p['default_conflict'] and not replace_default:
+        raise GatewayError('В сети уже задан другой маршрут по умолчанию. Подтвердите его замену в пункте 8.')
     previous = load_state()
     if previous:
         same = all(previous[k] == p[k] for k in ('network', 'subnet', 'gateway', 'wan_interface'))
         if same and p['zt_interface'] == previous['zt_interface']:
             run(['systemctl', 'restart', SERVICE])
+            if p['controller']:
+                member_path = 'controller/network/' + p['network'] + '/member/' + p['node']
+                if not (api(member_path, optional=True) or {}).get('name'):
+                    api(member_path, {'name': socket.gethostname()[:128]})
+            change = ensure_default_route(p, replace_default)
+            try:
+                if change:
+                    previous['route_change'] = change
+                    write(STATE, json.dumps(previous, indent=2), 0o600)
+            except Exception:
+                restore_default_route(p['network'], change)
+                raise
             return status()
         if not replace:
             raise GatewayError('Шлюз уже настроен для другой сети/интерфейса. Используйте «Изменить настройку».')
         disable()
         try:
-            return apply(nwid, wan)
+            restored_own_route = previous['network'] == p['network'] and bool(previous.get('route_change'))
+            return apply(nwid, wan, replace_default=replace_default or restored_own_route)
         except Exception as error:
             try:
-                apply(previous['network'], previous['wan_interface'])
+                apply(previous['network'], previous['wan_interface'], replace_default=bool(previous.get('route_change')))
             except Exception as restore_error:
                 raise GatewayError(f'Изменение не выполнено; прежний шлюз также не восстановлен: {restore_error}') from error
             raise GatewayError('Изменение не выполнено. Прежняя конфигурация шлюза восстановлена.') from error
@@ -338,13 +404,17 @@ def apply(nwid, wan=None, replace=False):
     write(backup / 'before.json', json.dumps({'local': saved_local, 'member': saved_member}, indent=2), 0o600)
     write(backup / 'iptables.rules', run(['iptables-save']).stdout, 0o600)
     changed_membership = False
+    route_change = None
     try:
         changed_membership = True
         if p['controller']:
             subnet = ipaddress.IPv4Network(p['subnet'])
             retained = [a for a in (saved_member or {}).get('ipAssignments', [])
                 if ipaddress.ip_address(a).version == 6 or ipaddress.ip_address(a) not in subnet]
-            api(member_path, {'authorized': True, 'noAutoAssignIps': True, 'ipAssignments': [p['gateway']] + retained})
+            payload = {'authorized': True, 'noAutoAssignIps': True, 'ipAssignments': [p['gateway']] + retained}
+            if not (saved_member or {}).get('name'):
+                payload['name'] = socket.gethostname()[:128]
+            api(member_path, payload)
         api('network/' + p['network'], {'allowManaged': True, 'allowDefault': False})
         for _ in range(30):
             local = local_networks().get(p['network'], {})
@@ -366,9 +436,19 @@ def apply(nwid, wan=None, replace=False):
         result = status()
         if not result['active'] or not result['rules_present'] or not result['ipv4_forwarding']:
             raise GatewayError('Служба шлюза или её правила не прошли проверку.')
-        return result
+        route_change = ensure_default_route(p, replace_default)
+        if route_change:
+            state['route_change'] = route_change
+            write(STATE, json.dumps(state, indent=2), 0o600)
+        return status()
     except Exception as error:
         cleanup_errors = []
+        if route_change:
+            try:
+                if not restore_default_route(p['network'], route_change):
+                    cleanup_errors.append('маршрут был изменён вручную; проверьте Routes')
+            except Exception:
+                cleanup_errors.append('не удалось восстановить маршрут на Controller')
         for args in (['systemctl', 'disable', '--now', SERVICE], [str(SCRIPT), 'stop'] if SCRIPT.exists() else None):
             if args:
                 result = run(args, check=False)
@@ -408,6 +488,7 @@ def main():
     parser.add_argument('--network')
     parser.add_argument('--wan')
     parser.add_argument('--replace', action='store_true')
+    parser.add_argument('--replace-default', action='store_true')
     args = parser.parse_args()
     if os.geteuid() != 0:
         raise GatewayError('Для настройки и чтения состояния шлюза нужны root/sudo.')
@@ -417,7 +498,7 @@ def main():
     elif args.command == 'plan':
         result = plan(args.network or '', args.wan)
     elif args.command == 'apply':
-        result = apply(args.network or '', args.wan, args.replace)
+        result = apply(args.network or '', args.wan, args.replace, args.replace_default)
     elif args.command == 'disable':
         result = disable()
     else:

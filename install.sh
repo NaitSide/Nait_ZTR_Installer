@@ -24,6 +24,7 @@ source "${REPO_ROOT}/lib/authorize.sh"
 source "${REPO_ROOT}/lib/gateway.sh"
 # shellcheck source=lib/status.sh
 source "${REPO_ROOT}/lib/status.sh"
+source "${REPO_ROOT}/lib/vpn.sh"
 
 print_help() {
   cat <<'EOF'
@@ -39,6 +40,7 @@ Nait_ZTR_Installer
   ./install.sh ztncui-install
   ./install.sh moon
   ./install.sh gateway
+  ./install.sh vpn-edition
   ./install.sh status
   ./install.sh help
 
@@ -50,6 +52,7 @@ Nait_ZTR_Installer
   authorize-node   Одобрить узел на локальном Controller.
   moon             Создать Moon на Controller или подключить её на узле.
   gateway          Настроить, проверить или отключить IPv4-шлюз ZeroTier.
+  vpn-edition      Последовательно выполнить пункты 1 → 3 → 7 → 8.
 EOF
 }
 
@@ -69,7 +72,8 @@ Nait ZTR Installer v${NAIT_ZTR_INSTALLER_VERSION} (MVP)
 7) Резервная Moon: создать на Controller / подключить на клиенте
 8) Настроить этот узел как шлюз в интернет
 9) Статус
-10) Выход
+10) VPN Edition — полная настройка (1 → 3 → 7 → 8)
+11) Выход
 
 EOF
 }
@@ -77,7 +81,7 @@ EOF
 interactive_menu() {
   while true; do
     show_menu
-    choice="$(read_user_input "Выберите пункт [1-10]: ")"
+    choice="$(read_user_input "Выберите пункт [1-11]: ")"
     case "${choice}" in
       1) install_controller_interactive ;;
       2) install_client_interactive ;;
@@ -88,7 +92,8 @@ interactive_menu() {
       7) configure_moon_interactive ;;
       8) configure_gateway_interactive ;;
       9) show_status ;;
-      10) log_info "Выход."; return 0 ;;
+      10) vpn_edition_interactive ;;
+      11) log_info "Выход."; return 0 ;;
       *) log_warn "Неизвестный пункт меню: ${choice}" ;;
     esac
   done
@@ -159,6 +164,16 @@ dispatch() {
       shift
       [[ "$#" -eq 0 ]] || die "Команда gateway не принимает аргументы."
       configure_gateway_interactive
+      ;;
+    vpn-edition)
+      shift
+      [[ "$#" -eq 0 ]] || die "Команда vpn-edition не принимает аргументы."
+      vpn_edition_interactive
+      ;;
+    vpn-edition-run)
+      shift
+      [[ "$#" -eq 0 ]] || die "Команда vpn-edition-run не принимает аргументы."
+      vpn_edition_run
       ;;
     help|-h|--help)
       print_help

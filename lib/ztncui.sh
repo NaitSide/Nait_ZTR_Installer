@@ -146,6 +146,7 @@ verify_offline_compose_package() {
 compose_install_plan_is_safe() {
   local plan
   plan="$(run_sudo_quiet apt-get -s install --no-install-recommends "$@")" || return 1
+  NAIT_ZTR_COMPOSE_PLAN="${plan}"
   # Never replace or upgrade an existing Docker engine just to add Compose.
   if printf '%s\n' "${plan}" | grep -E '^Remv |^Inst (docker\.io|docker-ce|docker-ce-cli|containerd|containerd\.io|runc) ' >/dev/null; then
     log_error "Установка Compose требует удаления пакетов или изменения Docker. Автоматическая установка отменена."
@@ -170,13 +171,16 @@ ensure_docker_compose() {
       rm -f "${local_package}"; rmdir "${temp_dir}"
       die "Не удалось построить безопасный план установки Compose."
     fi
-    if run_sudo apt-get install -y --no-install-recommends --no-download "${local_package}"; then
+    # APT --no-download can refuse to acquire even the explicitly supplied DEB.
+    # Use dpkg directly only when the APT plan needs no additional packages.
+    if ! awk -v package="${package_name}" '$1 == "Inst" && $2 != package {extra=1} END {exit !extra}' <<< "${NAIT_ZTR_COMPOSE_PLAN}" \
+      && run_sudo dpkg --install "${local_package}"; then
       rm -f "${local_package}"; rmdir "${temp_dir}"
       docker_compose_available || die "Compose установлен, но команда docker compose недоступна."
       return 0
     fi
     rm -f "${local_package}"; rmdir "${temp_dir}"
-    log_warn "Для локального Compose недостаёт зависимостей. Попробую пакетный репозиторий."
+    log_warn "Локальная установка Compose не завершена или требует дополнительных пакетов. Попробую пакетный репозиторий; причина указана выше."
   else
     log_info "Совместимого локального Compose нет. Установка ${package_name} из пакетного репозитория."
   fi

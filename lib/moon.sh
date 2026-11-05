@@ -208,6 +208,23 @@ controller_moon_endpoint() {
   run_sudo_quiet jq -r '.roots[0].stableEndpoints[0] // empty' "${NAIT_ZTR_MOON_CONFIG_FILE}" 2>/dev/null
 }
 
+offer_moon_download() {
+  local moon_id="${1:?Moon ID обязателен}" endpoint="${2:-}" public_ip result
+  confirm "Выдать временную ссылку на скачивание Moon на 5 минут?" "N" || return 0
+  public_ip="${endpoint%%[/:]*}"
+  if ! validate_ipv4 "${public_ip}"; then
+    log_warn "Публичный IPv4 Moon не определён; файл можно забрать по SFTP."
+    return 0
+  fi
+  if result="$(run_sudo_quiet python3 "${REPO_ROOT}/lib/moon_download.py" start "$(moon_public_filename "${moon_id}")" --public-ip "${public_ip}")"; then
+    printf '\nСсылка действует 5 минут:\n%s\n' "$(jq -r '.url' <<< "${result}")"
+    echo 'Временный сервер и его правило firewall удалятся автоматически.'
+    echo 'Если у провайдера есть внешний firewall, он также должен разрешать TCP-порт из ссылки.'
+  else
+    log_warn "Не удалось выдать ссылку. Публичный файл Moon сохранён; используйте SFTP."
+  fi
+}
+
 show_existing_controller_moon() {
   local moon_id
   local endpoint
@@ -232,6 +249,7 @@ show_existing_controller_moon() {
 - Файл для клиентов: ${public_file}
 
 EOF
+  offer_moon_download "${moon_id}" "${endpoint}"
 }
 
 open_moon_ufw_port_if_needed() {
@@ -346,6 +364,7 @@ EOF
 Если у VPS есть внешний firewall, разрешите ${NAIT_ZTR_MOON_PORT}/udp.
 
 EOF
+  offer_moon_download "${moon_id}" "${public_ip}"
 }
 
 connect_moon_by_id_interactive() {

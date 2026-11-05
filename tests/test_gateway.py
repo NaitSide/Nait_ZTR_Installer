@@ -26,6 +26,8 @@ class FakeHost:
         self.overlap = False
         self.commands = []
         self.requests = []
+        self.routes = [{'target': '10.77.77.0/24', 'via': None}]
+        self.fail_route = False
 
     def api(self, path, data=None, optional=False, method=None):
         self.requests.append((path, copy.deepcopy(data), method))
@@ -33,11 +35,17 @@ class FakeHost:
         if path == 'network': return copy.deepcopy(self.local)
         if path == 'controller/network': return [NW] if self.controlled else []
         if path == 'controller/network/' + NW:
-            return {'id': NW, 'name': 'test', 'private': True, 'routes': [{'target': '10.77.77.0/24', 'via': None}, {'target': '0.0.0.0/0', 'via': '10.77.77.1'}]}
+            if data is not None:
+                if self.fail_route:
+                    self.fail_route = False
+                    raise g.GatewayError('simulated route failure')
+                self.routes = copy.deepcopy(data['routes'])
+            return {'id': NW, 'name': 'test', 'private': True, 'routes': copy.deepcopy(self.routes)}
         if path == 'controller/network/' + NW + '/member': return copy.deepcopy(self.member_rows)
         if path.endswith('/member/' + NODE):
             if method == 'DELETE': self.member = None
-            elif data is not None: self.member = copy.deepcopy(data)
+            elif data is not None:
+                self.member = dict(self.member or {}, **copy.deepcopy(data))
             return copy.deepcopy(self.member)
         if '/member/' in path:
             return copy.deepcopy(self.member_rows[path.rsplit('/', 1)[1]])
@@ -139,6 +147,8 @@ class GatewayTests(unittest.TestCase):
         self.assertTrue(self.host.member['noAutoAssignIps'])
         self.assertFalse(self.host.local[0]['allowDefault'])
         self.assertTrue(g.UNIT.exists())
+        self.assertIn(g.exit_route('10.77.77.1'), self.host.routes)
+        self.assertEqual(self.host.member['name'], g.socket.gethostname()[:128])
         script = g.SCRIPT.read_text()
         self.assertIn('-s 10.77.77.0/24 -o eth0 -j MASQUERADE', script)
         self.assertNotIn('ufw disable', script)
@@ -151,7 +161,7 @@ class GatewayTests(unittest.TestCase):
         self.assertFalse(any(data is not None for _, data, _ in self.host.requests))
 
     def test_failed_activation_restores_membership_and_removes_files(self):
-        self.host.member = {'authorized': False, 'ipAssignments': ['10.77.77.99'], 'noAutoAssignIps': False}
+        self.host.member = {'authorized': False, 'ipAssignments': ['10.77.77.99'], 'noAutoAssignIps': False, 'name': ''}
         old = copy.deepcopy(self.host.member)
         self.host.fail_enable = True
         with self.assertRaisesRegex(g.GatewayError, 'отменены'): g.apply(NW)
@@ -167,7 +177,8 @@ class GatewayTests(unittest.TestCase):
         result = g.disable()
         self.assertFalse(result['configured'])
         self.assertTrue(self.host.local)
-        self.assertEqual(self.host.requests, [])
+        self.assertFalse(any('/member/' in path and data is not None for path, data, _ in self.host.requests))
+        self.assertEqual(self.host.routes, [{'target': '10.77.77.0/24', 'via': None}])
         self.assertFalse(any('net.ipv4.ip_forward=0' in arg for cmd in self.host.commands for arg in cmd))
         self.assertFalse(g.STATE.exists())
 
@@ -190,6 +201,63 @@ class GatewayTests(unittest.TestCase):
         state = g.load_state()
         self.assertEqual(state['wan_interface'], 'eth0')
         self.assertTrue(self.host.active)
+
+    def test_default_conflict_requires_consent_before_any_changes(self):
+        self.host.routes.append(g.exit_route('10.77.77.90'))
+        self.assertTrue(g.plan(NW)['default_conflict'])
+        with self.assertRaisesRegex(g.GatewayError, 'Подтвердите'): g.apply(NW)
+        self.assertIsNone(self.host.member)
+        self.assertFalse(g.STATE.exists())
+
+    def test_replace_route_preserves_other_routes_and_restores_on_disable(self):
+        self.host.routes += [{'target': '10.80.0.0/16', 'via': '10.77.77.20'}, g.exit_route('10.77.77.90')]
+        before = copy.deepcopy(self.host.routes)
+        g.apply(NW, replace_default=True)
+        self.assertIn(before[1], self.host.routes)
+        self.assertEqual(g.default_routes(self.host.routes), [g.exit_route('10.77.77.1')])
+        g.apply(NW)
+        g.disable()
+        self.assertEqual(self.host.routes, before)
+
+    def test_disable_does_not_overwrite_later_manual_route_changes(self):
+        g.apply(NW)
+        self.host.routes[-1] = g.exit_route('10.77.77.50')
+        g.disable()
+        self.assertEqual(g.default_routes(self.host.routes), [g.exit_route('10.77.77.50')])
+
+    def test_route_failure_rolls_back_gateway_and_membership(self):
+        self.host.fail_route = True
+        with self.assertRaisesRegex(g.GatewayError, 'отменены'): g.apply(NW)
+        self.assertIsNone(self.host.member)
+        self.assertFalse(g.STATE.exists())
+        self.assertFalse(self.host.active)
+
+    def test_existing_member_name_preserved(self):
+        self.host.member = {'name': 'My manually named server', 'ipAssignments': []}
+        g.apply(NW)
+        self.assertEqual(self.host.member['name'], 'My manually named server')
+
+    def test_preexisting_identical_default_route_not_owned_or_removed(self):
+        self.host.routes.append(g.exit_route('10.77.77.1'))
+        g.apply(NW)
+        self.assertNotIn('route_change', g.load_state())
+        g.disable()
+        self.assertIn(g.exit_route('10.77.77.1'), self.host.routes)
+
+    def test_upgrade_fills_empty_controller_member_name(self):
+        g.apply(NW)
+        self.host.member['name'] = ''
+        g.apply(NW)
+        self.assertEqual(self.host.member['name'], g.socket.gethostname()[:128])
+
+    def test_reconfigure_owned_route_keeps_original_before_state(self):
+        self.host.routes.append(g.exit_route('10.77.77.90'))
+        before = copy.deepcopy(self.host.routes)
+        g.apply(NW, replace_default=True)
+        g.apply(NW, wan='eth1', replace=True)
+        self.assertEqual(g.default_routes(self.host.routes), [g.exit_route('10.77.77.1')])
+        g.disable()
+        self.assertEqual(self.host.routes, before)
 
 
 if __name__ == '__main__':

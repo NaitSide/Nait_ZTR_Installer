@@ -23,22 +23,26 @@ gateway_print_status() {
 }
 
 gateway_setup_interactive() {
-  local replace="${1:-no}" choices selection count network plan wan
+  local replace="${1:-no}" choices selection count network="${2:-}" plan wan
+  local -a apply_flags=()
+  NAIT_ZTR_GATEWAY_COMPLETED=0
   if ! choices="$(gateway_backend networks)"; then
     return 0
   fi
-  count="$(jq 'length' <<< "${choices}")"
-  printf '\nВыберите сеть для выхода в интернет:\n'
-  jq -r 'to_entries[] | "\(.key + 1)) \(.value.name) — \(.value.id), \(.value.status)"' <<< "${choices}"
-  while true; do
-    selection="$(prompt_with_default "Номер сети (0 — назад)" "1")"
-    [[ "${selection}" == 0 ]] && return 0
-    if [[ "${selection}" =~ ^[0-9]{1,3}$ ]] && (( 10#${selection} >= 1 && 10#${selection} <= count )); then
-      break
-    fi
-    log_warn "Введите номер сети из списка."
-  done
-  network="$(jq -r --argjson i "$((10#${selection} - 1))" '.[$i].id' <<< "${choices}")"
+  if [[ -z "${network}" ]]; then
+    count="$(jq 'length' <<< "${choices}")"
+    printf '\nВыберите сеть для выхода в интернет:\n'
+    jq -r 'to_entries[] | "\(.key + 1)) \(.value.name) — \(.value.id), \(.value.status)" + (if .value.status == "NOT_JOINED" then " (этот VPS ещё не подключён к выбранной сети ZeroTier как участник)" else "" end)' <<< "${choices}"
+    while true; do
+      selection="$(prompt_with_default "Номер сети (0 — назад)" "1")"
+      [[ "${selection}" == 0 ]] && return 0
+      if [[ "${selection}" =~ ^[0-9]{1,3}$ ]] && (( 10#${selection} >= 1 && 10#${selection} <= count )); then
+        break
+      fi
+      log_warn "Введите номер сети из списка."
+    done
+    network="$(jq -r --argjson i "$((10#${selection} - 1))" '.[$i].id' <<< "${choices}")"
+  fi
   if ! plan="$(gateway_backend plan --network "${network}")"; then
     return 0
   fi
@@ -50,6 +54,7 @@ gateway_setup_interactive() {
   jq -r '"- Сеть: \(.name) (\(.network))", "- Адрес шлюза: \(.gateway)", "- Подсеть: \(.subnet)", "- Внешний интерфейс: \(.wan_interface)"' <<< "${plan}"
   if [[ "$(jq -r '.controller' <<< "${plan}")" == true ]]; then
     echo "- Текущий VPS будет подключён к выбранной сети и авторизован с адресом шлюза."
+    echo "- Маршрут 0.0.0.0/0 через адрес шлюза будет настроен автоматически."
   else
     echo "- Будет использован уже назначенный этому узлу адрес шлюза."
   fi
@@ -57,32 +62,39 @@ gateway_setup_interactive() {
 - Будут включены IPv4 forwarding, NAT и правила прохода из выбранной ZeroTier-сети в интернет.
 - Правила сохранятся после перезагрузки. Существующие правила Docker, UFW и SSH сохраняются.
 - Для самого шлюза Allow Default будет выключен, чтобы он выходил через провайдера.
-- Маршрут по умолчанию на Controller и настройки удалённых клиентов автоматически не меняются.
+- Настройки удалённых клиентов автоматически не меняются.
 - Поддерживается IPv4. IPv6 и DNS этим пунктом не настраиваются.
 EOF
   [[ "${replace}" != yes ]] || echo "- Прежняя настройка шлюза будет заменена; при ошибке будет предпринято её восстановление."
+  if [[ "$(jq -r '.default_conflict' <<< "${plan}")" == true ]]; then
+    jq -r '.current_defaults[] | "Текущий маршрут: \(.target) → \(.via // "без шлюза")"' <<< "${plan}"
+    confirm "Заменить существующий маршрут по умолчанию этой сети?" "N" || return 0
+    apply_flags+=(--replace-default)
+  fi
   confirm "Применить этот план?" "N" || return 0
   if [[ "${replace}" == yes ]]; then
-    if ! gateway_backend apply --network "${network}" --wan "${wan}" --replace >/dev/null; then
+    if ! gateway_backend apply --network "${network}" --wan "${wan}" --replace "${apply_flags[@]}" >/dev/null; then
       return 0
     fi
-  elif ! gateway_backend apply --network "${network}" --wan "${wan}" >/dev/null; then
+  elif ! gateway_backend apply --network "${network}" --wan "${wan}" "${apply_flags[@]}" >/dev/null; then
     return 0
   fi
   gateway_print_status
+  NAIT_ZTR_GATEWAY_COMPLETED=1
+  if [[ "$(jq -r '.controller' <<< "${plan}")" == true ]] && ztncui_container_exists; then
+    log_info "Заполняю пустое имя VPS в ZTNCUI; при изменении будет перезапущена только веб-панель."
+    run_sudo_quiet python3 "${REPO_ROOT}/lib/panel_name.py" "$(jq -r '.node' <<< "${plan}")" >/dev/null \
+      || log_warn "Имя VPS можно задать вручную в ZTNCUI. Шлюз настроен."
+  fi
   cat <<EOF
 
-Серверная часть шлюза настроена.
-В ZTNCUI → выбранная сеть → Routes добавьте:
-  Target:  0.0.0.0/0
-  Gateway: $(jq -r '.gateway' <<< "${plan}")
-Сохраните прямой маршрут $(jq -r '.subnet' <<< "${plan}").
-Перед сменой шлюза удалите/измените прежний default route этой сети.
-На клиенте: сначала проверьте ping до шлюза, затем включите Allow Default Route Override.
-На самом VPS-шлюзе эту галочку не включайте.
-Для проверки выхода откройте сайт определения IP: он должен показать публичный IP VPS.
+Шлюз настроен. Network ID: ${network}
+На клиенте: подключитесь к сети, одобрите устройство и включите Allow Default Route Override.
 
 EOF
+  if [[ "$(jq -r '.controller' <<< "${plan}")" != true ]]; then
+    echo "На удалённом Controller добавьте маршрут 0.0.0.0/0 через $(jq -r '.gateway' <<< "${plan}")."
+  fi
 }
 
 configure_gateway_interactive() {
@@ -111,9 +123,7 @@ EOF
   choice="$(prompt_with_default "Действие" "0")"
   case "${choice}" in
     1)
-      if gateway_backend apply --network "$(jq -r '.network' <<< "${state}")" --wan "$(jq -r '.wan_interface' <<< "${state}")" >/dev/null; then
-        gateway_print_status
-      fi
+      gateway_setup_interactive no "$(jq -r '.network' <<< "${state}")"
       ;;
     2) gateway_setup_interactive yes ;;
     3)

@@ -101,7 +101,7 @@ create_network_interactive() {
   preflight_common
   require_controller_host
 
-  network_name="$(prompt_with_default "Имя сети" "${NAIT_ZTR_DEFAULT_NETWORK_NAME}")"
+  network_name="$(prompt_with_default "Имя сети" "${1:-${NAIT_ZTR_DEFAULT_NETWORK_NAME}}")"
   [[ -n "${network_name}" ]] || die "Имя сети не может быть пустым."
 
   while true; do
@@ -146,6 +146,7 @@ create_network() {
   [[ -n "${network_id}" ]] || die "Controller API не вернул Network ID."
 
   update_controller_network "${network_id}" "${network_name}" "${network_cidr}" "${pool_start}" "${pool_end}" >/dev/null
+  NAIT_ZTR_CREATED_NETWORK_ID="${network_id}"
 
   cat <<EOF
 
