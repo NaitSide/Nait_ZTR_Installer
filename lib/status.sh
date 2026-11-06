@@ -237,6 +237,12 @@ status_print_ufw_block() {
 
   ufw_output="$(run_sudo_quiet ufw status verbose || true)"
   ufw_status="$(printf '%s\n' "${ufw_output}" | awk -F': ' '/^Status:/ {print $2; exit}')"
+  if [[ "${ufw_status}" == "inactive" ]]; then
+    echo "- Статус: выключен"
+    echo "- Политика входящих UFW: не применяется"
+    echo "- Правила UFW: не применяются"
+    return 0
+  fi
   incoming_policy="$(printf '%s\n' "${ufw_output}" | awk -F': ' '
     /^Default:/ {
       split($2, parts, ",")
